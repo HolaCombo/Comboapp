@@ -1344,3 +1344,120 @@ function TranscripcionPanel({ projectKey }) {
 }
 
 
+
+const PANELS = [
+  { id:'dashboard', label:'Dashboard', group:'General' },
+  { id:'misemana', label:'Mi Semana', group:'General' },
+  { id:'script', label:'Guión', group:'Preproducción' },
+  { id:'breakdown', label:'Breakdown', group:'Preproducción' },
+  { id:'storyboard', label:'Storyboard', group:'Preproducción' },
+  { id:'gantt', label:'Timeline / Gantt', group:'Producción' },
+  { id:'calendar', label:'Cronograma', group:'Producción' },
+  { id:'budget', label:'Presupuesto', group:'Finanzas', adminOnly:true },
+  { id:'tracking', label:'Seguimiento', group:'Equipo' },
+  { id:'notas', label:'Notas del equipo', group:'Equipo' },
+  { id:'files', label:'Archivos', group:'Equipo' },
+  { id:'transcripcion', label:'Transcripción', group:'Herramientas' },
+]
+
+export default function App() {
+  const [theme, setTheme] = useTheme()
+  const [user, setUser] = useState(null)
+  const [active, setActive] = useState('dashboard')
+  const { data: projects, insert: insertProject } = useSupabaseTable('projects', 'projects', seedProjects)
+  const { data: tasks } = useSupabaseTable('tasks', 'tracking_tasks', seedTasks)
+  const [currentProject, setCurrentProject] = useState(0)
+  const [showModal, setShowModal] = useState(false)
+  const [newProj, setNewProj] = useState({ name:'', director:'', duration:'' })
+
+  useEffect(() => { const saved = localStorage.getItem('combo_user'); if(saved) try { setUser(JSON.parse(saved)) } catch {} }, [])
+  const login = u => { setUser(u); localStorage.setItem('combo_user', JSON.stringify(u)) }
+  const logout = () => { setUser(null); localStorage.removeItem('combo_user') }
+
+  if (!user) return <LoginScreen onLogin={login} />
+
+  const visiblePanels = PANELS.filter(p => {
+    if (p.adminOnly && user.role!=='admin') return false
+    if (p.id==='misemana' && user.role!=='admin') return false
+    return true
+  })
+  const groups = [...new Set(visiblePanels.map(p=>p.group))]
+  const createProject = async () => { if(!newProj.name.trim()) return; await insertProject({ name:newProj.name, director:newProj.director, duration:newProj.duration, progress:0 }); setNewProj({name:'',director:'',duration:''}); setShowModal(false) }
+
+  const proj = projects[currentProject]
+  const projectKey = proj ? proj.name.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,30) : `proj_${currentProject}`
+
+  const renderPanel = () => {
+    switch(active) {
+      case 'dashboard': return <Dashboard projects={projects} tasks={tasks} />
+      case 'misemana': return <MiSemanaPanel user={user} />
+      case 'script': return <ScriptPanel projectKey={projectKey} />
+      case 'breakdown': return <BreakdownPanel projectKey={projectKey} />
+      case 'storyboard': return <StoryboardPanel projectKey={projectKey} />
+      case 'gantt': return <GanttPanel projects={projects} projectKey={projectKey} />
+      case 'calendar': return <CalendarPanel projectKey={projectKey} />
+      case 'budget': return user.role==='admin'?<BudgetPanel projectKey={projectKey} />:<div style={{ padding:40, textAlign:'center', color:'var(--text3)' }}>Sin acceso</div>
+      case 'tracking': return <TrackingPanel projectKey={projectKey} />
+      case 'notas': return <NotasPanel user={user} projects={projects} projectKey={projectKey} />
+      case 'files': return <FilesPanel projectKey={projectKey} />
+      case 'transcripcion': return <TranscripcionPanel projectKey={projectKey} />
+      default: return null
+    }
+  }
+
+  const current = visiblePanels.find(p=>p.id===active)
+  return (
+    <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg2)' }}>
+      <div style={{ width:220, minWidth:220, background:'var(--bg)', borderRight:'0.5px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden' }} className="no-print">
+        <div style={{ padding:'16px 14px', borderBottom:'0.5px solid var(--border)' }}>
+          <div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px' }}>Combo<span style={{ color:'var(--green)' }}>App</span></div>
+          <div style={{ marginTop:10 }}>
+            <div style={{ fontSize:10, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:4 }}>Proyecto activo</div>
+            <select style={{ width:'100%', padding:'6px 8px', fontSize:12, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', cursor:'pointer' }} value={currentProject} onChange={e=>{setCurrentProject(Number(e.target.value));setActive('dashboard')}}>
+              {projects.map((p,i)=><option key={p.id||i} value={i}>{p.name}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ padding:8, flex:1, overflowY:'auto' }}>
+          {groups.map(group=>(
+            <React.Fragment key={group}>
+              <div style={{ fontSize:10, fontWeight:500, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', padding:'10px 8px 4px' }}>{group}</div>
+              {visiblePanels.filter(p=>p.group===group).map(p=>(
+                <div key={p.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 8px', borderRadius:8, cursor:'pointer', fontSize:13, color:active===p.id?'var(--green-dark)':'var(--text2)', background:active===p.id?'var(--green-light)':'transparent', fontWeight:active===p.id?500:400, transition:'all 0.12s' }} onClick={()=>setActive(p.id)}>
+                  {p.label}
+                  {p.adminOnly&&<span style={{ fontSize:9, background:'var(--amber-light)', color:'var(--amber)', padding:'1px 5px', borderRadius:4, marginLeft:'auto' }}>admin</span>}
+                </div>
+              ))}
+            </React.Fragment>
+          ))}
+        </div>
+        <div style={{ padding:'10px 14px', borderTop:'0.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ fontSize:12, color:'var(--text2)' }}>{user.name}</div>
+          <button style={btnD} onClick={logout}>Salir</button>
+        </div>
+      </div>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+        <div style={{ padding:'0 20px', height:52, borderBottom:'0.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--bg)' }} className="no-print">
+          <div style={{ fontSize:14, fontWeight:500 }}>{current?.label}</div>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <div style={{ fontSize:12, color:'var(--text3)', marginRight:4 }}>{projects[currentProject]?.name}</div>
+            <button style={btnS} onClick={()=>setShowModal(true)}>+ Proyecto</button>
+            <button onClick={()=>setTheme(t=>t==='light'?'dark':'light')} style={{ padding:'6px 10px', fontSize:14, borderRadius:8, border:'0.5px solid var(--border2)', background:'transparent', color:'var(--text2)', cursor:'pointer' }}>
+              {theme==='light'?'🌙':'☀️'}
+            </button>
+          </div>
+        </div>
+        <div style={{ flex:1, overflowY:'auto', padding:20 }}>{renderPanel()}</div>
+      </div>
+      <Modal open={showModal} onClose={()=>setShowModal(false)} title="Nuevo proyecto">
+        {[['name','Nombre del proyecto'],['director','Director / responsable'],['duration','Duración (ej: 8 semanas)']].map(([k,ph])=>(
+          <div key={k} style={{ marginBottom:8 }}><input style={iStyle} value={newProj[k]} onChange={e=>setNewProj(p=>({...p,[k]:e.target.value}))} placeholder={ph} /></div>
+        ))}
+        <div style={{ display:'flex', gap:8, marginTop:12, justifyContent:'flex-end' }}>
+          <button style={btnS} onClick={()=>setShowModal(false)}>Cancelar</button>
+          <button style={btnP} onClick={createProject}>Crear</button>
+        </div>
+      </Modal>
+    </div>
+  )
+}
