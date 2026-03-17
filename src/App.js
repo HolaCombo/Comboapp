@@ -34,6 +34,8 @@ const ARTIST_COLORS = ['#1D9E75','#185FA5','#854F0B','#993556','#3B6D11','#533AB
 const ALL_ARTISTS = ['Enrique','Rubén','Cris','Tam','Laura','Carlos']
 const PROJECT_COLOR_PALETTE = ['#1D9E75','#185FA5','#854F0B','#993556','#533AB7','#3B6D11','#c48a30','#0F6E56','#A32D2D','#1a6b8a']
 const getProjectColor = (name, allProjects) => {
+  const proj = allProjects.find(p => (p.name||p) === name)
+  if (proj && proj.color) return proj.color
   const idx = allProjects.findIndex(p => (p.name||p) === name)
   return PROJECT_COLOR_PALETTE[idx >= 0 ? idx % PROJECT_COLOR_PALETTE.length : 0]
 }
@@ -95,9 +97,12 @@ function Dashboard({ projects, tasks }) {
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:12, marginBottom:20 }}>
         {projects.map(p=>(
           <div key={p.id} style={{ ...card, marginBottom:0 }}>
-            <div style={{ fontSize:13, fontWeight:500, marginBottom:4 }}>{p.name}</div>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+              <div style={{ width:10, height:10, borderRadius:'50%', background:getProjectColor(p.name, projects), flexShrink:0 }}></div>
+              <div style={{ fontSize:13, fontWeight:500 }}>{p.name}</div>
+            </div>
             <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10 }}>{p.director} · {p.duration}</div>
-            <div style={{ height:4, background:'var(--bg3)', borderRadius:2, overflow:'hidden' }}><div style={{ height:'100%', width:p.progress+'%', background:'var(--green)', borderRadius:2 }}></div></div>
+            <div style={{ height:4, background:'var(--bg3)', borderRadius:2, overflow:'hidden' }}><div style={{ height:'100%', width:p.progress+'%', background:getProjectColor(p.name,projects), borderRadius:2 }}></div></div>
             <div style={{ fontSize:11, color:'var(--text2)', marginTop:4 }}>{p.progress}% completado</div>
           </div>
         ))}
@@ -414,8 +419,9 @@ function GanttPanel({ projects, projectKey }) {
   const diffDays = (a,b) => Math.round((b-a)/86400000)
   const toDateStr = d => { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}` }
   const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-  const STATUS_OP = { done:1, active:0.85, pending:0.45, blocked:0.25 }
-  const STATUS_PATTERNS = { done:'none', active:'none', pending:'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.3) 4px, rgba(255,255,255,0.3) 6px)', blocked:'repeating-linear-gradient(90deg, transparent, transparent 4px, rgba(255,255,255,0.4) 4px, rgba(255,255,255,0.4) 6px)' }
+  const STATUS_OP = { done:1, active:1, pending:1, blocked:1 }
+  const STATUS_COLORS_BAR = { done:'#1D9E75', active:'#185FA5', pending:'#c48a30', blocked:'#A32D2D' }
+  const STATUS_PATTERNS = { done:'none', active:'none', pending:'repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(255,255,255,0.25) 5px, rgba(255,255,255,0.25) 7px)', blocked:'repeating-linear-gradient(90deg, transparent, transparent 5px, rgba(255,255,255,0.3) 5px, rgba(255,255,255,0.3) 7px)' }
   const CELL = zoom==='week' ? 36 : 110
 
   const addRow = async () => { if(!newRow.task||!newRow.start||!newRow.end) return; await insertRow({task:newRow.task, start_date:newRow.start, end_date:newRow.end, assignee:newRow.assignee, status:newRow.status, project_key:projectKey}); setShowForm(false) }
@@ -553,7 +559,7 @@ function GanttPanel({ projects, projectKey }) {
                 <div style={{ padding:'5px 12px', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', fontSize:11, fontWeight:500, color:'var(--text2)' }}>{proj}</div>
                 {rows.filter(r=>(r.project||'General')===proj).map(r=>(
                   <div key={r.id} style={{ height:44, display:'flex', alignItems:'center', padding:'0 12px', borderBottom:'0.5px solid var(--border)', gap:8, cursor:'pointer' }} onClick={()=>setEditingRow({...r})}>
-                    <div style={{ width:8, height:8, borderRadius:'50%', background:getProjectColor(r.project, projects)||'#888', flexShrink:0, opacity:STATUS_OP[r.status]||0.6 }}></div>
+                    <div style={{ width:8, height:8, borderRadius:'50%', background:STATUS_COLORS_BAR[r.status]||getProjectColor(r.project, projects)||'#888', flexShrink:0 }}></div>
                     <div style={{ flex:1 }}>
                       <div style={{ fontSize:12, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.task}</div>
                       <div style={{ fontSize:10, color:'var(--text3)' }}>{r.start} → {r.end}</div>
@@ -1363,7 +1369,7 @@ export default function App() {
   const { data: tasks } = useSupabaseTable('tasks', 'tracking_tasks', seedTasks)
   const [currentProject, setCurrentProject] = useState(0)
   const [showModal, setShowModal] = useState(false)
-  const [newProj, setNewProj] = useState({ name:'', director:'', duration:'' })
+  const [newProj, setNewProj] = useState({ name:'', director:'', duration:'', color:'' })
 
   useEffect(() => { const saved = localStorage.getItem('combo_user'); if(saved) try { setUser(JSON.parse(saved)) } catch {} }, [])
   const login = u => { setUser(u); localStorage.setItem('combo_user', JSON.stringify(u)) }
@@ -1377,7 +1383,7 @@ export default function App() {
     return true
   })
   const groups = [...new Set(visiblePanels.map(p=>p.group))]
-  const createProject = async () => { if(!newProj.name.trim()) return; await insertProject({ name:newProj.name, director:newProj.director, duration:newProj.duration, progress:0 }); setNewProj({name:'',director:'',duration:''}); setShowModal(false) }
+  const createProject = async () => { if(!newProj.name.trim()) return; await insertProject({ name:newProj.name, director:newProj.director, duration:newProj.duration, progress:0, color:newProj.color||'' }); setNewProj({name:'',director:'',duration:'',color:''}); setShowModal(false) }
 
   const proj = projects[currentProject]
   const projectKey = proj ? proj.name.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,30) : `proj_${currentProject}`
@@ -1408,9 +1414,12 @@ export default function App() {
           <div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px' }}>Combo<span style={{ color:'var(--green)' }}>App</span></div>
           <div style={{ marginTop:10 }}>
             <div style={{ fontSize:10, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:4 }}>Proyecto activo</div>
-            <select style={{ width:'100%', padding:'6px 8px', fontSize:12, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', cursor:'pointer' }} value={currentProject} onChange={e=>{setCurrentProject(Number(e.target.value));setActive('dashboard')}}>
-              {projects.map((p,i)=><option key={p.id||i} value={i}>{p.name}</option>)}
-            </select>
+            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <div style={{ width:10, height:10, borderRadius:'50%', background: getProjectColor(projects[currentProject]?.name, projects), flexShrink:0 }}></div>
+              <select style={{ flex:1, padding:'6px 8px', fontSize:12, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', cursor:'pointer' }} value={currentProject} onChange={e=>{setCurrentProject(Number(e.target.value));setActive('dashboard')}}>
+                {projects.map((p,i)=><option key={p.id||i} value={i}>{p.name}</option>)}
+              </select>
+            </div>
           </div>
         </div>
         <div style={{ padding:8, flex:1, overflowY:'auto' }}>
@@ -1448,6 +1457,19 @@ export default function App() {
         {[['name','Nombre del proyecto'],['director','Director / responsable'],['duration','Duración (ej: 8 semanas)']].map(([k,ph])=>(
           <div key={k} style={{ marginBottom:8 }}><input style={iStyle} value={newProj[k]} onChange={e=>setNewProj(p=>({...p,[k]:e.target.value}))} placeholder={ph} /></div>
         ))}
+        <div style={{ marginBottom:8 }}>
+          <label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:6 }}>Color del proyecto</label>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            {PROJECT_COLOR_PALETTE.map(c=>(
+              <div key={c} onClick={()=>setNewProj(p=>({...p,color:c}))}
+                style={{ width:28, height:28, borderRadius:'50%', background:c, cursor:'pointer', border: newProj.color===c ? '3px solid var(--text)' : '3px solid transparent', transition:'transform 0.1s', transform: newProj.color===c?'scale(1.2)':'scale(1)' }} />
+            ))}
+          </div>
+          {newProj.color && <div style={{ fontSize:11, color:'var(--text3)', marginTop:6, display:'flex', alignItems:'center', gap:6 }}>
+            <div style={{ width:12, height:12, borderRadius:'50%', background:newProj.color }}></div>
+            Color seleccionado
+          </div>}
+        </div>
         <div style={{ display:'flex', gap:8, marginTop:12, justifyContent:'flex-end' }}>
           <button style={btnS} onClick={()=>setShowModal(false)}>Cancelar</button>
           <button style={btnP} onClick={createProject}>Crear</button>
