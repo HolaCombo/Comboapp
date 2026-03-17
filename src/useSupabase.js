@@ -1,50 +1,66 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
 
+// Optimistic updates + Supabase realtime sync
 export function useSupabaseTable(table, localKey, init, orderCol = 'created_at') {
   const [data, setData] = useState(() => {
     try { const s = localStorage.getItem(localKey); return s ? JSON.parse(s) : init }
     catch { return init }
   })
+
   const persist = useCallback((rows) => {
-    setData(rows); localStorage.setItem(localKey, JSON.stringify(rows))
+    setData(rows)
+    localStorage.setItem(localKey, JSON.stringify(rows))
   }, [localKey])
+
   useEffect(() => {
     if (!supabase) return
     supabase.from(table).select('*').order(orderCol, { ascending: true })
       .then(({ data: rows }) => { if (rows) persist(rows) })
+
     const channel = supabase.channel(`rt_${table}`)
       .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
         supabase.from(table).select('*').order(orderCol, { ascending: true })
           .then(({ data: rows }) => { if (rows) persist(rows) })
-      }).subscribe()
+      })
+      .subscribe()
+
     return () => { supabase.removeChannel(channel) }
   }, [table, localKey, orderCol, persist])
+
   const insert = async (row) => {
     const tempId = Date.now()
     const tempRow = { ...row, id: tempId }
-    setData(d => { const n=[...d,tempRow]; localStorage.setItem(localKey,JSON.stringify(n)); return n })
+    // Optimistic: show immediately
+    setData(d => { const n=[...d, tempRow]; localStorage.setItem(localKey, JSON.stringify(n)); return n })
     if (!supabase) return tempRow
     const { data: inserted } = await supabase.from(table).insert([row]).select()
     if (inserted?.[0]) {
+      // Replace temp with real
       setData(d => { const n=d.map(x=>x.id===tempId?inserted[0]:x); localStorage.setItem(localKey,JSON.stringify(n)); return n })
       return inserted[0]
     }
     return tempRow
   }
+
   const update = async (id, changes) => {
+    // Optimistic
     setData(d => { const n=d.map(x=>x.id===id?{...x,...changes}:x); localStorage.setItem(localKey,JSON.stringify(n)); return n })
     if (!supabase) return
     supabase.from(table).update(changes).eq('id', id)
   }
+
   const remove = async (id) => {
+    // Optimistic: remove immediately
     setData(d => { const n=d.filter(x=>x.id!==id); localStorage.setItem(localKey,JSON.stringify(n)); return n })
     if (!supabase) return
     supabase.from(table).delete().eq('id', id)
   }
+
   return { data, setData, insert, update, remove }
 }
 
+// Upload file to Supabase Storage
 export async function uploadFile(file, bucket = 'archivos') {
   if (!supabase) return null
   const ext = file.name.split('.').pop()
@@ -58,4 +74,58 @@ export async function uploadFile(file, bucket = 'archivos') {
 export async function deleteFile(path, bucket = 'archivos') {
   if (!supabase) return
   await supabase.storage.from(bucket).remove([path])
+}
+
+// Hook for single-document tables (scripts, breakdowns, storyboards)
+// Stores entire data as JSON in one row per project_key
+export function useSupabaseDoc(table, projectKey, init) {
+  const lsKey = `${table}_${projectKey}`
+  const [data, setDataLocal] = useState(() => {
+    try { const s = localStorage.getItem(lsKey); return s ? JSON.parse(s) : init }
+    catch { return init }
+  })
+  const [rowId, setRowId] = useState(null)
+
+  useEffect(() => {
+    if (!supabase || !projectKey) return
+    supabase.from(table).select('*').eq('project_key', projectKey).limit(1)
+      .then(({ data: rows }) => {
+        if (rows && rows.length > 0) {
+          const row = rows[0]
+          setRowId(row.id)
+          const parsed = row.lines || row.rows || row.panels || row.data || init
+          setDataLocal(parsed)
+          localStorage.setItem(lsKey, JSON.stringify(parsed))
+        }
+      })
+
+    const channel = supabase.channel(`doc_${table}_${projectKey}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+        if (payload.new?.project_key === projectKey) {
+          const parsed = payload.new.lines || payload.new.rows || payload.new.panels || payload.new.data || init
+          setDataLocal(parsed)
+          localStorage.setItem(lsKey, JSON.stringify(parsed))
+          setRowId(payload.new.id)
+        }
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [table, projectKey])
+
+  const colName = table === 'scripts' ? 'lines' : table === 'breakdowns' ? 'rows' : table === 'storyboards' ? 'panels' : 'data'
+
+  const save = async (newData) => {
+    setDataLocal(newData)
+    localStorage.setItem(lsKey, JSON.stringify(newData))
+    if (!supabase) return
+    if (rowId) {
+      supabase.from(table).update({ [colName]: newData, updated_at: new Date().toISOString() }).eq('id', rowId)
+    } else {
+      const { data: inserted } = await supabase.from(table).insert([{ project_key: projectKey, [colName]: newData }]).select()
+      if (inserted?.[0]) setRowId(inserted[0].id)
+    }
+  }
+
+  return [data, save]
 }
