@@ -401,7 +401,7 @@ function StoryboardPanel({ projectKey }) {
 
 function GanttPanel({ projects, projectKey }) {
   const { data: rawRows, insert: insertRow, update: updateRowDB, remove: removeRowDB } = useSupabaseTable('gantt_tasks', `gantt_rows_${projectKey}`, [], 'created_at')
-  const filteredRows = rawRows.filter(r => !r.project_key || r.project_key === projectKey)
+  const filteredRows = (Array.isArray(rawRows) ? rawRows : []).filter(r => !r.project_key || r.project_key === projectKey)
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
   const [editingRow, setEditingRow] = useState(null)
@@ -621,7 +621,7 @@ function GanttPanel({ projects, projectKey }) {
 
 function CalendarPanel({ projectKey }) {
   const { data: calRows, insert: insertEvent, remove: removeEvent } = useSupabaseTable('calendar_events', `cal_events_${projectKey}`, [], 'created_at')
-  const filteredCalRows = calRows.filter(r => r.project_key === projectKey)
+  const filteredCalRows = (Array.isArray(calRows) ? calRows : []).filter(r => r.project_key === projectKey)
   const events = filteredCalRows.reduce((acc, r) => { acc[r.event_date] = r.event_name; return acc }, {})
   const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState(new Date().getMonth())
@@ -745,7 +745,7 @@ function BudgetPanel({ projectKey }) {
 
 function TrackingPanel({ projectKey }) {
   const { data: allTasks, insert: insertTaskDB, update: updateTask, remove: removeTaskDB } = useSupabaseTable('tracking', `tracking_${projectKey}`, [], 'created_at')
-  const tasks = allTasks.filter(r => !r.project_key || r.project_key === projectKey)
+  const tasks = (Array.isArray(allTasks) ? allTasks : []).filter(r => !r.project_key || r.project_key === projectKey)
   const insertTask = row => insertTaskDB({...row, project_key: projectKey})
   const removeTask = id => removeTaskDB(id)
   const [filter, setFilter] = useState('all')
