@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { useSupabaseTable } from './useSupabase'
+import { useSupabaseTable, uploadFile, deleteFile } from './useSupabase'
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 function useTheme() {
@@ -139,8 +139,9 @@ function Dashboard({ projects, tasks }) {
   )
 }
 
-function ScriptPanel() {
-  const [lines, setLines] = useLS('script_lines', [
+function ScriptPanel({ projectKey }) {
+  const lsKeyS = `script_lines_${projectKey}`
+  const [lines, setLines] = useLS(lsKeyS, [
     { type:'scene', text:'INT. DEPARTAMENTO - DÍA' },
     { type:'action', text:'El sol entra por las persianas. VALENTINA (28) despierta sobresaltada.' },
     { type:'character', text:'VALENTINA' },
@@ -177,28 +178,69 @@ function ScriptPanel() {
   )
 }
 
-function BreakdownPanel() {
-  const [rows, setRows] = useLS('breakdown_rows', seedBreakdown)
+function BreakdownPanel({ projectKey }) {
+  const lsKey = `breakdown_rows_${projectKey}`
+  const [rows, setRows] = useLS(lsKey, seedBreakdown)
   const [mode, setMode] = useState('arte')
+  const [importing, setImporting] = useState(false)
   const artistColor = name => { const idx = ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
   const update = (id,key,val) => setRows(r=>r.map(x=>x.id===id?{...x,[key]:val}:x))
   const addRow = () => setRows(r=>[...r,{ id:Date.now(), numEscena:'', secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:'', desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'' }])
   const remove = id => setRows(r=>r.filter(x=>x.id!==id))
+
+  const handleImport = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setImporting(true)
+    const isCSV = file.name.endsWith('.csv')
+    const isImg = file.type.startsWith('image/')
+    const isPDF = file.type === 'application/pdf'
+    if (isImg || isPDF) {
+      // Import as single visual row
+      const reader = new FileReader()
+      reader.onload = ev => {
+        setRows(r => [...r, { id:Date.now(), numEscena:String(r.length+1), secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:`Importado: ${file.name}`, desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'', importedImg: ev.target.result }])
+        setImporting(false)
+      }
+      reader.readAsDataURL(file)
+    } else {
+      // CSV/Excel: parse rows
+      const reader = new FileReader()
+      reader.onload = ev => {
+        try {
+          const text = ev.target.result
+          const lines = text.split('\n').filter(l=>l.trim())
+          const headers = lines[0].split(',').map(h=>h.trim().toLowerCase())
+          const newRows = lines.slice(1).map((line,i) => {
+            const vals = line.split(',').map(v=>v.trim().replace(/^"|"$/g,''))
+            const obj = {}
+            headers.forEach((h,idx) => { obj[h] = vals[idx]||'' })
+            return { id:Date.now()+i, numEscena:obj['escena']||obj['#']||String(i+1), secuencia:obj['secuencia']||obj['seq']||'', inF:parseInt(obj['in'])||0, outF:parseInt(obj['out'])||0, frames:parseInt(obj['frames'])||0, fps:parseInt(obj['fps'])||8, timecode:obj['timecode']||obj['h:m:s:f']||'', personajes:obj['personajes']||obj['characters']||'', desglosArte:obj['desglose arte']||obj['arte']||obj['opening']||'', desglosAnim:obj['desglose animacion']||obj['animacion']||obj['storyline']||'', artista:obj['artista']||obj['artist']||'', animador:obj['animador']||'', dias:parseInt(obj['dias'])||0, estatus:obj['estatus']||obj['status']||'pendiente', comentarios:obj['comentarios']||obj['comments']||'' }
+          })
+          setRows(r => [...r, ...newRows])
+        } catch(err) { alert('Error al leer el archivo. Verifica el formato.') }
+        setImporting(false)
+      }
+      reader.readAsText(file)
+    }
+    e.target.value = ''
+  }
+
   const arteColumns = [{ key:'numEscena', label:'Esc.', w:40 },{ key:'secuencia', label:'Secuencia', w:80 },{ key:'inF', label:'In', w:50 },{ key:'outF', label:'Out', w:50 },{ key:'frames', label:'Frames', w:60 },{ key:'timecode', label:'Timecode', w:100 },{ key:'personajes', label:'Personajes', w:130 },{ key:'desglosArte', label:'Desglose Arte', w:180 },{ key:'artista', label:'Artista', w:90 },{ key:'dias', label:'Días', w:50 },{ key:'estatus', label:'Estatus', w:100 },{ key:'comentarios', label:'Comentarios', w:180 }]
   const animColumns = [{ key:'numEscena', label:'Esc.', w:40 },{ key:'secuencia', label:'Secuencia', w:80 },{ key:'inF', label:'In', w:50 },{ key:'outF', label:'Out', w:50 },{ key:'frames', label:'Frames', w:60 },{ key:'fps', label:'FPS', w:45 },{ key:'timecode', label:'H:M:S:F', w:100 },{ key:'personajes', label:'Personajes', w:130 },{ key:'desglosAnim', label:'Desglose Animación', w:180 },{ key:'layout', label:'Layout', w:55 },{ key:'rough', label:'Rough', w:55 },{ key:'clean', label:'Clean', w:55 },{ key:'color', label:'Color', w:55 },{ key:'composite', label:'Comp.', w:55 },{ key:'animador', label:'Animador', w:90 },{ key:'dias', label:'Días', w:50 },{ key:'estatus', label:'Estatus', w:100 },{ key:'comentarios', label:'Comentarios', w:180 }]
   const cols = mode==='arte' ? arteColumns : animColumns
+
   return (
     <div>
       <div style={{ display:'flex', gap:8, marginBottom:16, alignItems:'center', flexWrap:'wrap' }}>
         {[['arte','Modo Arte'],['animacion','Modo Animación']].map(([m,label])=>(
           <button key={m} style={{ padding:'6px 16px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:mode===m?'var(--green)':'transparent', color:mode===m?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setMode(m)}>{label}</button>
         ))}
-        <div style={{ marginLeft:'auto', display:'flex', gap:10, flexWrap:'wrap' }}>
-          {ALL_ARTISTS.map((a,i)=>(
-            <div key={a} style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'var(--text2)' }}>
-              <div style={{ width:8, height:8, borderRadius:2, background:ARTIST_COLORS[i%ARTIST_COLORS.length], opacity:0.8 }}></div>{a}
-            </div>
-          ))}
+        <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+          <div style={{ position:'relative' }}>
+            <button style={btnS}>{importing?'Importando...':'↑ Importar'}</button>
+            <input type="file" accept=".csv,.xlsx,.xls,.pdf,image/*" onChange={handleImport} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={importing} />
+          </div>
         </div>
       </div>
       <div style={{ overflowX:'auto', border:'0.5px solid var(--border)', borderRadius:14 }}>
@@ -213,7 +255,7 @@ function BreakdownPanel() {
                 <tr key={row.id} style={{ borderLeft: color?`3px solid ${color}55`:'3px solid transparent' }}>
                   {cols.map(c=>(
                     <td key={c.key} style={{ ...TD, width:c.w, minWidth:c.w }}>
-                      {c.key==='estatus' ? <select value={row[c.key]} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, color:sColor, fontWeight:500, cursor:'pointer' }}>{['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}</select>
+                      {c.key==='estatus' ? <select value={row[c.key]||'pendiente'} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, color:sColor, fontWeight:500, cursor:'pointer' }}>{['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}</select>
                       : c.key==='artista'||c.key==='animador' ? <select value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, color:row[c.key]?artistColor(row[c.key]):'var(--text3)', fontWeight:500, cursor:'pointer' }}><option value="">—</option>{ALL_ARTISTS.map(a=><option key={a} value={a}>{a}</option>)}</select>
                       : c.key==='comentarios'||c.key==='desglosArte'||c.key==='desglosAnim'||c.key==='personajes' ? <textarea value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4 }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                       : <input value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={TDI} />}
@@ -231,45 +273,163 @@ function BreakdownPanel() {
   )
 }
 
-function StoryboardPanel() {
-  const [panels, setPanels] = useLS('storyboard_panels', seedPanels)
-  const add = () => setPanels(p=>[...p,{id:Date.now(),img:null,desc:'',duration:''}])
+function StoryboardPanel({ projectKey }) {
+  const lsKey = `storyboard_panels_${projectKey}`
+  const [panels, setPanels] = useLS(lsKey, seedPanels)
+  const [view, setView] = useState('cards') // cards | table
+  const [importing, setImporting] = useState(false)
+
+  const add = () => setPanels(p=>[...p,{id:Date.now(),img:null,desc:'',duration:'',artista:'',dialogo:'',comentarios:'',estatus:'pendiente'}])
   const remove = id => setPanels(p=>p.filter(x=>x.id!==id))
   const update = (id,key,val) => setPanels(p=>p.map(x=>x.id===id?{...x,[key]:val}:x))
   const loadImg = (id,file) => { const r=new FileReader(); r.onload=e=>update(id,'img',e.target.result); r.readAsDataURL(file) }
-  const downloadPDF = () => window.print()
+
+  const handleImport = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setImporting(true)
+    const isImg = file.type.startsWith('image/')
+    const isPDF = file.type === 'application/pdf'
+    if (isImg) {
+      const reader = new FileReader()
+      reader.onload = ev => {
+        setPanels(p=>[...p,{id:Date.now(),img:ev.target.result,desc:`Importado: ${file.name}`,duration:'',artista:'',dialogo:'',comentarios:'',estatus:'pendiente'}])
+        setImporting(false)
+      }
+      reader.readAsDataURL(file)
+    } else if (file.name.endsWith('.csv')) {
+      const reader = new FileReader()
+      reader.onload = ev => {
+        const lines = ev.target.result.split('\n').filter(l=>l.trim())
+        const headers = lines[0].split(',').map(h=>h.trim().toLowerCase())
+        const newPanels = lines.slice(1).map((line,i)=>{
+          const vals = line.split(',').map(v=>v.trim().replace(/^"|"$/g,''))
+          const obj = {}; headers.forEach((h,idx)=>{ obj[h]=vals[idx]||'' })
+          return { id:Date.now()+i, img:null, desc:obj['descripcion']||obj['desc']||obj['storyline']||obj['opening']||'', duration:obj['duracion']||obj['duration']||'', artista:obj['artista']||obj['artist']||'', dialogo:obj['dialogo']||obj['dialogue']||'', comentarios:obj['comentarios']||'', estatus:obj['estatus']||obj['status']||'pendiente' }
+        })
+        setPanels(p=>[...p,...newPanels])
+        setImporting(false)
+      }
+      reader.readAsText(file)
+    } else {
+      setImporting(false)
+      alert('Para PDF puedes subir cada página como imagen. Para Excel guarda como CSV primero.')
+    }
+    e.target.value=''
+  }
+
+  const artistColor = name => { const idx=ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
+
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:16 }} className="no-print">
-        <button style={btnS} onClick={downloadPDF}>↓ Descargar PDF</button>
-      </div>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))', gap:16 }}>
-        {panels.map((p,i)=>(
-          <div key={p.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
-            <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between' }}>
-              <span>Panel {i+1}</span>
-              <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>remove(p.id)}>✕</button>
-            </div>
-            <div style={{ position:'relative', aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-              {p.img ? <img src={p.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <div style={{ textAlign:'center', pointerEvents:'none' }}><div style={{ fontSize:22, color:'var(--text3)' }}>+</div><div style={{ fontSize:11, color:'var(--text3)' }}>Subir imagen</div></div>}
-              <input type="file" accept="image/*" className="no-print" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
-            </div>
-            <div style={{ padding:'8px 12px' }}>
-              <textarea value={p.desc} onChange={e=>update(p.id,'desc',e.target.value)} placeholder="Descripción..." rows={2} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5 }} />
-            </div>
-            <div style={{ padding:'0 12px 10px' }}>
-              <input value={p.duration} onChange={e=>update(p.id,'duration',e.target.value)} placeholder="Duración: 3s" style={{ ...TDI, fontSize:11, color:'var(--text3)', width:90 }} />
-            </div>
-          </div>
+      <div style={{ display:'flex', gap:8, marginBottom:16, alignItems:'center', flexWrap:'wrap' }} className="no-print">
+        {[['cards','Tarjetas'],['table','Breakdown-Storyboard']].map(([v,label])=>(
+          <button key={v} style={{ padding:'6px 16px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:view===v?'var(--green)':'transparent', color:view===v?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setView(v)}>{label}</button>
         ))}
-        <button onClick={add} className="no-print" style={{ border:'1.5px dashed var(--border2)', background:'transparent', borderRadius:14, aspectRatio:'16/9', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'var(--text3)', fontSize:12 }}>+ Nuevo panel</button>
+        <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+          <div style={{ position:'relative' }}>
+            <button style={btnS} disabled={importing}>{importing?'Importando...':'↑ Importar'}</button>
+            <input type="file" accept=".csv,.pdf,image/*" onChange={handleImport} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={importing} />
+          </div>
+          <button style={btnS} onClick={()=>window.print()}>↓ PDF</button>
+        </div>
       </div>
+
+      {view==='cards' ? (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))', gap:16 }}>
+          {panels.map((p,i)=>(
+            <div key={p.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
+              <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span>Panel {i+1}</span>
+                <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                  <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)} style={{ fontSize:10, border:'none', background:'transparent', color:STATUS_COLORS[p.estatus]||'#888', cursor:'pointer', outline:'none' }}>
+                    {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>remove(p.id)}>✕</button>
+                </div>
+              </div>
+              <div style={{ position:'relative', aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                {p.img ? <img src={p.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <div style={{ textAlign:'center', pointerEvents:'none' }}><div style={{ fontSize:22, color:'var(--text3)' }}>+</div><div style={{ fontSize:11, color:'var(--text3)' }}>Subir imagen</div></div>}
+                <input type="file" accept="image/*" className="no-print" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+              </div>
+              <div style={{ padding:'8px 12px 4px' }}>
+                <textarea value={p.desc||''} onChange={e=>update(p.id,'desc',e.target.value)} placeholder="Descripción / Acción..." rows={2} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5 }} />
+              </div>
+              <div style={{ padding:'0 12px 4px' }}>
+                <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} placeholder="Diálogo / Guión..." rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic' }} />
+              </div>
+              <div style={{ padding:'0 12px 4px' }}>
+                <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} placeholder="Comentarios..." rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px' }} />
+              </div>
+              <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
+                <input value={p.duration||''} onChange={e=>update(p.id,'duration',e.target.value)} placeholder="Duración: 3s" style={{ ...TDI, fontSize:11, color:'var(--text3)', width:80 }} />
+                <select value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', cursor:'pointer', width:80 }}>
+                  <option value="">Artista</option>
+                  {ALL_ARTISTS.map(a=><option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+            </div>
+          ))}
+          <button onClick={add} className="no-print" style={{ border:'1.5px dashed var(--border2)', background:'transparent', borderRadius:14, aspectRatio:'16/9', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'var(--text3)', fontSize:12 }}>+ Nuevo panel</button>
+        </div>
+      ) : (
+        // Breakdown-Storyboard table view
+        <div style={{ overflowX:'auto', border:'0.5px solid var(--border)', borderRadius:14 }}>
+          <table style={{ borderCollapse:'collapse', fontSize:12, background:'var(--bg)', width:'100%' }}>
+            <thead>
+              <tr>
+                {['#','Imagen','Desglose Arte / Acción','Artista','Diálogo / Guión','Comentarios','Duración','Estatus'].map(h=>(
+                  <th key={h} style={TH}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {panels.map((p,i)=>(
+                <tr key={p.id}>
+                  <td style={{ ...TD, width:30, textAlign:'center', fontWeight:500, color:'var(--text3)' }}>{i+1}</td>
+                  <td style={{ ...TD, width:120 }}>
+                    <div style={{ position:'relative', width:100, height:56, background:'var(--bg3)', borderRadius:6, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      {p.img ? <img src={p.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <span style={{ fontSize:10, color:'var(--text3)' }}>Sin imagen</span>}
+                      <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+                    </div>
+                  </td>
+                  <td style={{ ...TD, width:200 }}>
+                    <textarea value={p.desc||''} onChange={e=>update(p.id,'desc',e.target.value)} rows={2} style={{ ...TDI, resize:'none', lineHeight:1.4 }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                  </td>
+                  <td style={{ ...TD, width:90 }}>
+                    <select value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} style={{ ...TDI, color:p.artista?artistColor(p.artista):'var(--text3)', fontWeight:500, cursor:'pointer' }}>
+                      <option value="">—</option>
+                      {ALL_ARTISTS.map(a=><option key={a} value={a}>{a}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ ...TD, width:180 }}>
+                    <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} rows={2} style={{ ...TDI, resize:'none', lineHeight:1.4, fontStyle:'italic' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                  </td>
+                  <td style={{ ...TD, width:160 }}>
+                    <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} rows={2} style={{ ...TDI, resize:'none', lineHeight:1.4, color:'var(--green-dark)' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                  </td>
+                  <td style={{ ...TD, width:70 }}>
+                    <input value={p.duration||''} onChange={e=>update(p.id,'duration',e.target.value)} style={{ ...TDI, width:60 }} placeholder="3s" />
+                  </td>
+                  <td style={{ ...TD, width:100 }}>
+                    <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)} style={{ ...TDI, color:STATUS_COLORS[p.estatus]||'#888', fontWeight:500, cursor:'pointer' }}>
+                      {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {view==='table'&&<button style={{ ...btnS, marginTop:12 }} onClick={add}>+ Agregar panel</button>}
     </div>
   )
 }
 
-function GanttPanel({ projects }) {
-  const [rows, setRows] = useLS('gantt_rows', seedGantt)
+function GanttPanel({ projects, projectKey }) {
+  const lsKeyG = `gantt_rows_${projectKey}`
+  const [rows, setRows] = useLS(lsKeyG, seedGantt)
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
   const [newRow, setNewRow] = useState({ task:'', start:'', end:'', assignee:'', status:'pending', project:projects[0]?.name||'' })
@@ -358,27 +518,42 @@ function GanttPanel({ projects }) {
   )
 }
 
-function CalendarPanel() {
-  const [events, setEvents] = useLS('cal_events', { '2025-01-05':'Guión','2025-01-10':'Reunión','2025-01-15':'Rodaje','2025-01-20':'Entrega','2025-01-25':'Revisión' })
+function CalendarPanel({ projectKey }) {
+  const lsKey = `cal_events_${projectKey}`
+  const [events, setEvents] = useLS(lsKey, {})
+  const [year, setYear] = useState(new Date().getFullYear())
+  const [month, setMonth] = useState(new Date().getMonth())
   const [adding, setAdding] = useState(null)
   const [newEvt, setNewEvt] = useState('')
+  const MONTHS_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
   const pad = d => String(d).padStart(2,'0')
-  const keyFor = d => `2025-01-${pad(d)}`
-  const firstDay = new Date(2025,0,1).getDay()
+  const keyFor = d => `${year}-${pad(month+1)}-${pad(d)}`
+  const firstDay = new Date(year,month,1).getDay()
   const offset = firstDay===0?6:firstDay-1
+  const daysInMonth = new Date(year,month+1,0).getDate()
+  const prevMonth = () => { if(month===0){setMonth(11);setYear(y=>y-1)}else setMonth(m=>m-1) }
+  const nextMonth = () => { if(month===11){setMonth(0);setYear(y=>y+1)}else setMonth(m=>m+1) }
+  const today = new Date()
   return (
     <div>
-      <div style={{ fontSize:14, fontWeight:500, marginBottom:16 }}>Enero 2025 — Cronograma</div>
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
+        <button style={btnS} onClick={prevMonth}>←</button>
+        <div style={{ fontSize:14, fontWeight:500, flex:1, textAlign:'center' }}>{MONTHS_FULL[month]} {year}</div>
+        <button style={btnS} onClick={nextMonth}>→</button>
+        <button style={{ ...btnS, fontSize:11 }} onClick={()=>{setMonth(today.getMonth());setYear(today.getFullYear())}}>Hoy</button>
+      </div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4, marginBottom:6 }}>
         {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=><div key={d} style={{ textAlign:'center', fontSize:11, color:'var(--text3)', padding:4 }}>{d}</div>)}
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4 }}>
         {Array(offset).fill(null).map((_,i)=><div key={'e'+i}></div>)}
-        {Array.from({length:31},(_,i)=>i+1).map(d=>{
+        {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>{
           const key=keyFor(d); const evt=events[key]
-          return <div key={d} onClick={()=>{setAdding(key);setNewEvt(evt||'')}} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:10, minHeight:52, padding:6, cursor:'pointer' }}>
-            <div style={{ fontSize:12 }}>{d}</div>
-            {evt&&<div style={{ fontSize:9, background:'var(--green-light)', color:'var(--green-dark)', padding:'1px 4px', borderRadius:3, marginTop:2 }}>{evt}</div>}
+          const isToday = today.getDate()===d&&today.getMonth()===month&&today.getFullYear()===year
+          return <div key={d} onClick={()=>{setAdding(key);setNewEvt(evt||'')}}
+            style={{ background:'var(--bg)', border:`0.5px solid ${isToday?'var(--green)':'var(--border)'}`, borderRadius:10, minHeight:52, padding:6, cursor:'pointer' }}>
+            <div style={{ fontSize:12, fontWeight:isToday?500:400, color:isToday?'var(--green)':'var(--text)' }}>{d}</div>
+            {evt&&<div style={{ fontSize:9, background:'var(--green-light)', color:'var(--green-dark)', padding:'1px 4px', borderRadius:3, marginTop:2, lineHeight:1.4 }}>{evt}</div>}
           </div>
         })}
       </div>
@@ -394,8 +569,9 @@ function CalendarPanel() {
   )
 }
 
-function BudgetPanel() {
-  const [rows, setRows] = useLS('budget_rows', seedBudget)
+function BudgetPanel({ projectKey }) {
+  const lsKeyB = `budget_rows_${projectKey}`
+  const [rows, setRows] = useLS(lsKeyB, seedBudget)
   const update = (id,key,val) => setRows(r=>r.map(x=>x.id===id?{...x,[key]:key==='concept'||key==='section'?val:parseFloat(val)||0}:x))
   const remove = id => setRows(r=>r.filter(x=>x.id!==id))
   const addRow = () => setRows(r=>[...r,{id:Date.now(),section:'General',concept:'',days:0,unitario:0,iva:0.16}])
@@ -454,17 +630,56 @@ function BudgetPanel() {
   )
 }
 
-function TrackingPanel() {
-  const [tasks, setTasks] = useLS('tracking_tasks', seedTasks)
+function TrackingPanel({ projectKey }) {
+  const lsKeyT = `tracking_tasks_${projectKey}`
+  const [tasks, setTasks] = useLS(lsKeyT, seedTasks)
+  const insertTask = row => setTasks(t=>[...t,{...row,id:Date.now()}])
+  const updateTask = (id,ch) => setTasks(t=>t.map(x=>x.id===id?{...x,...ch}:x))
+  const removeTask = id => setTasks(t=>t.filter(x=>x.id!==id))
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(null)
   const [newName, setNewName] = useState('')
   const [newAssignee, setNewAssignee] = useState('')
-  const toggle = id => setTasks(t=>t.map(x=>x.id===id?{...x,done:!x.done}:x))
-  const addTask = () => { if(!newName.trim()) return; setTasks(t=>[...t,{id:Date.now(),name:newName.trim(),project:'General',assignee:newAssignee||'Sin asignar',done:false,week:'hoy',files:[]}]); setNewName(''); setNewAssignee('') }
-  const addFile = (taskId,file) => { const r=new FileReader(); r.onload=e=>setTasks(t=>t.map(x=>x.id===taskId?{...x,files:[...(x.files||[]),{id:Date.now(),name:file.name,type:file.type,size:file.size,src:e.target.result,date:new Date().toLocaleDateString('es-MX'),comment:''}]}:x)); r.readAsDataURL(file) }
-  const updateComment = (taskId,fileId,comment) => setTasks(t=>t.map(x=>x.id===taskId?{...x,files:(x.files||[]).map(f=>f.id===fileId?{...f,comment}:f)}:x))
-  const removeFile = (taskId,fileId) => setTasks(t=>t.map(x=>x.id===taskId?{...x,files:(x.files||[]).filter(f=>f.id!==fileId)}:x))
+  const [uploading, setUploading] = useState(null)
+
+  const toggle = id => {
+    const task = tasks.find(x=>x.id===id)
+    if (task) updateTask(id, { done: !task.done })
+  }
+
+  const addTask = () => {
+    if(!newName.trim()) return
+    insertTask({ name:newName.trim(), project:'General', assignee:newAssignee||'Sin asignar', done:false, week:'hoy', files:[] })
+    setNewName(''); setNewAssignee('')
+  }
+
+  const addFile = async (taskId, file) => {
+    setUploading(taskId)
+    const task = tasks.find(x=>x.id===taskId)
+    const existingFiles = task?.files || []
+    // Try cloud upload first
+    const uploaded = await uploadFile(file)
+    const fileRecord = uploaded
+      ? { id:Date.now(), name:file.name, type:file.type, size:file.size, url:uploaded.url, path:uploaded.path, date:new Date().toLocaleDateString('es-MX'), comment:'' }
+      : await new Promise(res => { const r=new FileReader(); r.onload=e=>res({ id:Date.now(), name:file.name, type:file.type, size:file.size, url:e.target.result, date:new Date().toLocaleDateString('es-MX'), comment:'' }); r.readAsDataURL(file) })
+    await updateTask(taskId, { files: [...existingFiles, fileRecord] })
+    setUploading(null)
+  }
+
+  const updateFileComment = (taskId, fileId, comment) => {
+    const task = tasks.find(x=>x.id===taskId)
+    if (!task) return
+    updateTask(taskId, { files: (task.files||[]).map(f=>f.id===fileId?{...f,comment}:f) })
+  }
+
+  const removeFile = async (taskId, fileId) => {
+    const task = tasks.find(x=>x.id===taskId)
+    if (!task) return
+    const file = (task.files||[]).find(f=>f.id===fileId)
+    if (file?.path) await deleteFile(file.path)
+    updateTask(taskId, { files: (task.files||[]).filter(f=>f.id!==fileId) })
+  }
+
   const visible = tasks.filter(t=>filter==='all'||(filter==='pending'&&!t.done)||(filter==='done'&&t.done))
   return (
     <div>
@@ -501,8 +716,9 @@ function TrackingPanel() {
                         </div>
                         <div style={{ padding:'8px 10px' }}>
                           <div style={{ fontSize:11, fontWeight:500, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.name}</div>
-                          <div style={{ fontSize:10, color:'var(--text3)', marginBottom:4 }}>{f.date} · {(f.size/1024).toFixed(0)}KB</div>
-                          <input style={{ ...iStyle, fontSize:11, padding:'4px 7px' }} value={f.comment||''} onChange={e=>updateComment(t.id,f.id,e.target.value)} placeholder="Comentario..." />
+                          <div style={{ fontSize:10, color:'var(--text3)', marginBottom:4 }}>{f.date} · {f.size?(f.size/1024).toFixed(0)+'KB':''}</div>
+                          <input style={{ ...iStyle, fontSize:11, padding:'4px 7px' }} value={f.comment||''} onChange={e=>updateFileComment(t.id,f.id,e.target.value)} placeholder="Comentario..." />
+                          {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:2 }}>Ver archivo ↗</a>}
                           <button style={{ ...btnD, marginTop:4, fontSize:10 }} onClick={()=>removeFile(t.id,f.id)}>Eliminar</button>
                         </div>
                       </div>
@@ -510,8 +726,8 @@ function TrackingPanel() {
                   })}
                 </div>
                 <div style={{ position:'relative', display:'inline-block' }}>
-                  <button style={btnS}>+ Adjuntar archivo</button>
-                  <input type="file" multiple accept="image/*,video/*,audio/*,.pdf,.zip" onChange={e=>Array.from(e.target.files).forEach(f=>addFile(t.id,f))} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+                  <button style={btnS} disabled={uploading===t.id}>{uploading===t.id?'Subiendo...':'+ Adjuntar archivo'}</button>
+                  <input type="file" multiple accept="image/*,video/*,audio/*,.pdf,.zip" onChange={e=>Array.from(e.target.files).forEach(f=>addFile(t.id,f))} style={{ position:'absolute', inset:0, opacity:0, cursor: uploading===t.id?'wait':'pointer' }} />
                 </div>
               </div>
             )}
@@ -527,31 +743,48 @@ function TrackingPanel() {
   )
 }
 
-function FilesPanel() {
-  const [files, setFiles] = useLS('project_files',[])
-  const handleUpload = e => { Array.from(e.target.files).forEach(file=>{ const r=new FileReader(); r.onload=ev=>setFiles(f=>[...f,{id:Date.now()+Math.random(),name:file.name,type:file.type,size:file.size,src:ev.target.result,comment:'',date:new Date().toLocaleDateString('es-MX')}]); r.readAsDataURL(file) }) }
-  const updateComment = (id,comment) => setFiles(f=>f.map(x=>x.id===id?{...x,comment}:x))
-  const remove = id => setFiles(f=>f.filter(x=>x.id!==id))
+function FilesPanel({ projectKey }) {
+  const lsKeyF = `project_files_${projectKey}`
+  const [files, setFiles] = useLS(lsKeyF, [])
+  const [uploading, setUploading] = useState(false)
+  const handleUpload = async e => {
+    setUploading(true)
+    for (const file of Array.from(e.target.files)) {
+      const uploaded = await uploadFile(file)
+      const record = uploaded
+        ? { id:Date.now()+Math.random(), name:file.name, type:file.type, size:file.size, url:uploaded.url, path:uploaded.path, comment:'', date:new Date().toLocaleDateString('es-MX') }
+        : await new Promise(res => { const r=new FileReader(); r.onload=ev=>res({ id:Date.now()+Math.random(), name:file.name, type:file.type, size:file.size, url:ev.target.result, comment:'', date:new Date().toLocaleDateString('es-MX') }); r.readAsDataURL(file) })
+      setFiles(f => { const n=[...f,record]; localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+    }
+    setUploading(false)
+  }
+  const updateComment = (id,comment) => setFiles(f=>{ const n=f.map(x=>x.id===id?{...x,comment}:x); localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+  const remove = async id => {
+    const file = files.find(x=>x.id===id)
+    if (file?.path) await deleteFile(file.path)
+    setFiles(f=>{ const n=f.filter(x=>x.id!==id); localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+  }
   return (
     <div>
-      <div style={{ border:'1.5px dashed var(--border2)', borderRadius:14, padding:30, textAlign:'center', background:'var(--bg2)', position:'relative', marginBottom:20, cursor:'pointer' }}>
-        <div style={{ fontSize:13, color:'var(--text2)', marginBottom:4 }}>Arrastra archivos aquí o haz clic</div>
+      <div style={{ border:'1.5px dashed var(--border2)', borderRadius:14, padding:30, textAlign:'center', background:'var(--bg2)', position:'relative', marginBottom:20, cursor: uploading?'wait':'pointer' }}>
+        <div style={{ fontSize:13, color:'var(--text2)', marginBottom:4 }}>{uploading ? 'Subiendo archivos...' : 'Arrastra archivos aquí o haz clic'}</div>
         <div style={{ fontSize:12, color:'var(--text3)' }}>Video, imagen, audio — para revisión</div>
-        <input type="file" multiple accept="image/*,video/*,audio/*" onChange={handleUpload} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+        <input type="file" multiple accept="image/*,video/*,audio/*" onChange={handleUpload} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={uploading} />
       </div>
       {files.length===0&&<div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>Sin archivos aún</div>}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))', gap:12 }}>
-        {files.map(f=>{ const isImg=f.type.startsWith('image/'), isVid=f.type.startsWith('video/')
+        {files.map(f=>{ const isImg=f.type?.startsWith('image/'), isVid=f.type?.startsWith('video/')
           return <div key={f.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
             <div style={{ aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-              {isImg&&<img src={f.src} alt={f.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} />}
-              {isVid&&<video src={f.src} style={{ width:'100%', height:'100%', objectFit:'cover' }} muted />}
+              {isImg&&<img src={f.url} alt={f.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} />}
+              {isVid&&<video src={f.url} style={{ width:'100%', height:'100%', objectFit:'cover' }} muted />}
               {!isImg&&!isVid&&<div style={{ fontSize:28 }}>🎵</div>}
             </div>
             <div style={{ padding:'8px 10px' }}>
               <div style={{ fontSize:11, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.name}</div>
-              <div style={{ fontSize:10, color:'var(--text3)', marginTop:1 }}>{f.date} · {(f.size/1024).toFixed(0)}KB</div>
-              <input style={{ ...iStyle, marginTop:6, fontSize:11, padding:'4px 7px' }} value={f.comment} onChange={e=>updateComment(f.id,e.target.value)} placeholder="Comentario..." />
+              <div style={{ fontSize:10, color:'var(--text3)', marginTop:1 }}>{f.date} · {f.size?(f.size/1024).toFixed(0)+'KB':''}</div>
+              <input style={{ ...iStyle, marginTop:6, fontSize:11, padding:'4px 7px' }} value={f.comment||''} onChange={e=>updateComment(f.id,e.target.value)} placeholder="Comentario..." />
+              {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:2 }}>Ver archivo ↗</a>}
               <button style={{ ...btnD, marginTop:6 }} onClick={()=>remove(f.id)}>Eliminar</button>
             </div>
           </div>
@@ -712,7 +945,7 @@ function CorteView({ corte, onEdit, onDelete }) {
 }
 
 // ─── Notas compartidas ────────────────────────────────────────────────────────
-function NotasPanel({ user, projects }) {
+function NotasPanel({ user, projects, projectKey }) {
   const { data: notas, insert: insertNota, remove: removeNota } = useSupabaseTable('notas', 'notas_compartidas', [])
   const [proyecto, setProyecto] = useState('todos')
   const [texto, setTexto] = useState('')
@@ -721,12 +954,17 @@ function NotasPanel({ user, projects }) {
   const send = async () => {
     if (!texto.trim()) return
     const fecha = new Date().toLocaleString('es-MX', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
-    await insertNota({ user_name: user.name, texto: texto.trim(), proyecto: proyecto==='todos'?'General':proyecto, fecha })
+    const projName = proyecto==='todos' ? (currentProjName||'General') : proyecto
+    await insertNota({ user_name: user.name, texto: texto.trim(), proyecto: projName, fecha })
     setTexto('')
   }
 
   const remove = id => removeNota(id)
-  const visible = proyecto==='todos' ? notas : notas.filter(n=>n.proyecto===proyecto)
+  const currentProjName = projects.find((_,i)=>i===parseInt(projectKey.replace('p','')))?.name || null
+  const visible = notas.filter(n => {
+    const matchesProj = proyecto==='todos' ? true : n.proyecto===proyecto
+    return matchesProj
+  })
   const USER_COLORS = { 'Admin':'#1D9E75', 'Animador 1':'#185FA5', 'Artista 1':'#854F0B' }
 
   return (
@@ -813,23 +1051,30 @@ export default function App() {
 
   if (!user) return <LoginScreen onLogin={login} />
 
-  const visiblePanels = PANELS.filter(p => !p.adminOnly || user.role==='admin')
+  const visiblePanels = PANELS.filter(p => {
+    if (p.adminOnly && user.role!=='admin') return false
+    if (p.id==='misemana' && user.role!=='admin') return false
+    return true
+  })
   const groups = [...new Set(visiblePanels.map(p=>p.group))]
   const createProject = async () => { if(!newProj.name.trim()) return; await insertProject({ name:newProj.name, director:newProj.director, duration:newProj.duration, progress:0 }); setNewProj({name:'',director:'',duration:''}); setShowModal(false) }
+
+  const proj = projects[currentProject]
+  const projectKey = proj ? `p${proj.id||currentProject}` : `p${currentProject}`
 
   const renderPanel = () => {
     switch(active) {
       case 'dashboard': return <Dashboard projects={projects} tasks={tasks} />
       case 'misemana': return <MiSemanaPanel user={user} />
-      case 'script': return <ScriptPanel />
-      case 'breakdown': return <BreakdownPanel />
-      case 'storyboard': return <StoryboardPanel />
-      case 'gantt': return <GanttPanel projects={projects} />
-      case 'calendar': return <CalendarPanel />
-      case 'budget': return user.role==='admin'?<BudgetPanel />:<div style={{ padding:40, textAlign:'center', color:'var(--text3)' }}>Sin acceso</div>
-      case 'tracking': return <TrackingPanel />
-      case 'notas': return <NotasPanel user={user} projects={projects} />
-      case 'files': return <FilesPanel />
+      case 'script': return <ScriptPanel projectKey={projectKey} />
+      case 'breakdown': return <BreakdownPanel projectKey={projectKey} />
+      case 'storyboard': return <StoryboardPanel projectKey={projectKey} />
+      case 'gantt': return <GanttPanel projects={projects} projectKey={projectKey} />
+      case 'calendar': return <CalendarPanel projectKey={projectKey} />
+      case 'budget': return user.role==='admin'?<BudgetPanel projectKey={projectKey} />:<div style={{ padding:40, textAlign:'center', color:'var(--text3)' }}>Sin acceso</div>
+      case 'tracking': return <TrackingPanel projectKey={projectKey} />
+      case 'notas': return <NotasPanel user={user} projects={projects} projectKey={projectKey} />
+      case 'files': return <FilesPanel projectKey={projectKey} />
       default: return null
     }
   }
