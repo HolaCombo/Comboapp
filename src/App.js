@@ -15,9 +15,12 @@ function useLS(key, init) {
 }
 
 const USERS = [
-  { id:1, name:'Admin', username:'admin', password:'combo2025', role:'admin' },
-  { id:2, name:'Animador 1', username:'anim1', password:'anim1pass', role:'member' },
-  { id:3, name:'Artista 1', username:'arte1', password:'arte1pass', role:'member' },
+  { id:1, name:'Admin', username:'Gabs', password:'Gabs2026', role:'admin' },
+  { id:2, name:'Animador 1', username:'combo3', password:'combo3pass', role:'member' },
+  { id:3, name:'Animador 2', username:'combo4', password:'combo4pass', role:'member' },
+  { id:4, name:'Artista 1', username:'combo1', password:'combo1pass', role:'member' },
+  { id:5, name:'Artista 2', username:'combo2', password:'combo2pass', role:'member' },
+  { id:6, name:'Project 1', username:'combo5', password:'combo5pass', role:'member' },
 ]
 
 const iStyle = { padding:'7px 10px', fontSize:13, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', width:'100%', outline:'none', marginBottom:2 }
