@@ -32,43 +32,18 @@ const STATUS_COLORS = { done:'#1D9E75', active:'#185FA5', pending:'#854F0B', blo
 const fmt = n => '$' + Math.round(n).toLocaleString('es-MX')
 const ARTIST_COLORS = ['#1D9E75','#185FA5','#854F0B','#993556','#3B6D11','#533AB7']
 const ALL_ARTISTS = ['Enrique','Rubén','Cris','Tam','Laura','Carlos']
-const PROJECT_COLORS = { 'Cortometraje Urbano':'#1D9E75', 'Serie Animada S1':'#185FA5', 'Spot Publicitario':'#854F0B' }
+const PROJECT_COLOR_PALETTE = ['#1D9E75','#185FA5','#854F0B','#993556','#533AB7','#3B6D11','#c48a30','#0F6E56','#A32D2D','#1a6b8a']
+const getProjectColor = (name, allProjects) => {
+  const idx = allProjects.findIndex(p => (p.name||p) === name)
+  return PROJECT_COLOR_PALETTE[idx >= 0 ? idx % PROJECT_COLOR_PALETTE.length : 0]
+}
 
-const seedProjects = [
-  { id:1, name:'Cortometraje Urbano', director:'Ana Luisa', duration:'8 semanas', progress:65 },
-  { id:2, name:'Serie Animada S1', director:'Carlos M.', duration:'16 semanas', progress:30 },
-  { id:3, name:'Spot Publicitario', director:'Laura T.', duration:'3 semanas', progress:85 },
-]
-const seedGantt = [
-  { id:1, task:'Guión definitivo', start:'2025-01-06', end:'2025-01-20', assignee:'Ana Luisa', status:'done', project:'Cortometraje Urbano' },
-  { id:2, task:'Storyboard completo', start:'2025-01-15', end:'2025-01-28', assignee:'Carlos M.', status:'active', project:'Cortometraje Urbano' },
-  { id:3, task:'Animatic ep.1', start:'2025-01-20', end:'2025-02-05', assignee:'Carlos', status:'active', project:'Serie Animada S1' },
-  { id:4, task:'Rodaje spot', start:'2025-01-08', end:'2025-01-20', assignee:'Equipo', status:'done', project:'Spot Publicitario' },
-  { id:5, task:'Animación personajes', start:'2025-02-10', end:'2025-03-01', assignee:'Laura', status:'pending', project:'Cortometraje Urbano' },
-  { id:6, task:'Color grading', start:'2025-01-22', end:'2025-01-30', assignee:'Laura', status:'active', project:'Spot Publicitario' },
-]
-const seedBudget = [
-  { id:1, section:'Preproducción', concept:'Guión y desarrollo', days:10, unitario:1500, iva:0.16 },
-  { id:2, section:'Preproducción', concept:'Storyboard / Animatic', days:8, unitario:1200, iva:0.16 },
-  { id:3, section:'Producción', concept:'Equipo técnico', days:15, unitario:3000, iva:0.16 },
-  { id:4, section:'Producción', concept:'Locaciones', days:3, unitario:4000, iva:0 },
-  { id:5, section:'Postproducción', concept:'Edición y color', days:10, unitario:2000, iva:0.16 },
-  { id:6, section:'Postproducción', concept:'Musicalización', days:5, unitario:1500, iva:0.16 },
-]
-const seedBreakdown = [
-  { id:1, numEscena:'1', secuencia:'Sec 1', inF:0, outF:61, frames:61, fps:8, timecode:'00:00:07:05', personajes:'Abuelo, Cloe', desglosArte:'Fondo interior, ventana luz', desglosAnim:'Abuelo actitud serena, Cloe loop', layout:'', rough:'2', clean:'2', color:'', composite:'', artista:'Enrique', animador:'Rubén', dias:2, estatus:'aprobado', comentarios:'Cloe actitud juguetona' },
-  { id:2, numEscena:'2', secuencia:'Sec 1', inF:61, outF:107, frames:46, fps:8, timecode:'00:00:05:06', personajes:'Abuelo', desglosArte:'Fondo exterior calle', desglosAnim:'Abuelo con caja', layout:'', rough:'3', clean:'1', color:'', composite:'', artista:'Enrique', animador:'Cris', dias:1, estatus:'revision', comentarios:'' },
-  { id:3, numEscena:'3', secuencia:'Sec 1', inF:107, outF:312, frames:205, fps:8, timecode:'00:00:25:05', personajes:'Abuelo, Cloe, Grillo', desglosArte:'Ondas sonido', desglosAnim:'Grillo entra, reacción Cloe', layout:'', rough:'5', clean:'2', color:'', composite:'', artista:'Enrique', animador:'Rubén', dias:5, estatus:'pendiente', comentarios:'Falta ajustar grillo' },
-]
-const seedTasks = [
-  { id:1, name:'Animatic episodio 2', project:'Serie Animada S1', assignee:'Carlos M.', done:false, week:'semana 3', files:[] },
-  { id:2, name:'Storyboard escena 1-5', project:'Cortometraje Urbano', assignee:'Ana L.', done:true, week:'semana 2', files:[] },
-  { id:3, name:'Rigging personaje principal', project:'Serie Animada S1', assignee:'Laura T.', done:false, week:'semana 3', files:[] },
-]
-const seedPanels = [
-  { id:1, img:null, desc:'Valentina despierta sobresaltada.', duration:'3s' },
-  { id:2, img:null, desc:'Close-up del reloj marcando las 8:00.', duration:'2s' },
-]
+const seedProjects = []
+const seedGantt = []
+const seedBudget = []
+const seedBreakdown = []
+const seedTasks = []
+const seedPanels = []
 
 function Modal({ open, onClose, title, children }) {
   if (!open) return null
@@ -442,14 +417,16 @@ function GanttPanel({ projects, projectKey }) {
   const diffDays = (a,b) => Math.round((b-a)/86400000)
   const toDateStr = d => { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}` }
   const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-  const STATUS_OP = { done:1, active:0.85, pending:0.55, blocked:0.4 }
+  const STATUS_OP = { done:1, active:0.85, pending:0.45, blocked:0.25 }
+  const STATUS_PATTERNS = { done:'none', active:'none', pending:'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.3) 4px, rgba(255,255,255,0.3) 6px)', blocked:'repeating-linear-gradient(90deg, transparent, transparent 4px, rgba(255,255,255,0.4) 4px, rgba(255,255,255,0.4) 6px)' }
   const CELL = zoom==='week' ? 36 : 110
 
   const addRow = () => { if(!newRow.task||!newRow.start||!newRow.end) return; setRows(r=>[...r,{...newRow,id:Date.now()}]); setShowForm(false) }
   const remove = id => setRows(r=>r.filter(x=>x.id!==id))
   const updateRow = (id, changes) => setRows(r=>r.map(x=>x.id===id?{...x,...changes}:x))
 
-  const validRows = rows.filter(r=>r.start&&r.end)
+  const isValidDate = s => s && s.match(/^\d{4}-\d{2}-\d{2}$/) && !isNaN(new Date(s))
+  const validRows = rows.filter(r=>isValidDate(r.start)&&isValidDate(r.end))
   const allDates = validRows.flatMap(r=>[parseDate(r.start),parseDate(r.end)])
   let minD = allDates.length ? new Date(Math.min(...allDates)) : new Date()
   let maxD = allDates.length ? new Date(Math.max(...allDates)) : addDays(new Date(),60)
@@ -460,7 +437,7 @@ function GanttPanel({ projects, projectKey }) {
   if(zoom==='week'){let d=new Date(minD);while(d<=maxD){cols.push(new Date(d));d=addDays(d,7)}}
   else{let d=new Date(minD.getFullYear(),minD.getMonth(),1);while(d<=maxD){cols.push(new Date(d));d=new Date(d.getFullYear(),d.getMonth()+1,1)}}
   const totalW = cols.length*CELL
-  const allProjects = [...new Set(validRows.map(r=>r.project||'General'))]
+  const allProjects = [...new Set(rows.map(r=>r.project||'General'))]
 
   const pxToDate = (px) => {
     if(zoom==='week') return addDays(minD, Math.round((px/CELL)*7))
@@ -567,9 +544,9 @@ function GanttPanel({ projects, projectKey }) {
             {allProjects.map(proj=>(
               <React.Fragment key={proj}>
                 <div style={{ padding:'5px 12px', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', fontSize:11, fontWeight:500, color:'var(--text2)' }}>{proj}</div>
-                {validRows.filter(r=>(r.project||'General')===proj).map(r=>(
+                {rows.filter(r=>(r.project||'General')===proj).map(r=>(
                   <div key={r.id} style={{ height:44, display:'flex', alignItems:'center', padding:'0 12px', borderBottom:'0.5px solid var(--border)', gap:8, cursor:'pointer' }} onClick={()=>setEditingRow({...r})}>
-                    <div style={{ width:8, height:8, borderRadius:'50%', background:PROJECT_COLORS[r.project]||'#888', flexShrink:0, opacity:STATUS_OP[r.status]||0.6 }}></div>
+                    <div style={{ width:8, height:8, borderRadius:'50%', background:getProjectColor(r.project, projects)||'#888', flexShrink:0, opacity:STATUS_OP[r.status]||0.6 }}></div>
                     <div style={{ flex:1 }}>
                       <div style={{ fontSize:12, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.task}</div>
                       <div style={{ fontSize:10, color:'var(--text3)' }}>{r.start} → {r.end}</div>
@@ -596,7 +573,7 @@ function GanttPanel({ projects, projectKey }) {
                 <React.Fragment key={proj}>
                   <div style={{ height:26, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
                   {validRows.filter(r=>(r.project||'General')===proj).map(r=>{
-                    const color = PROJECT_COLORS[r.project]||'#888'
+                    const color = getProjectColor(r.project, projects)||'#888'
                     const op = STATUS_OP[r.status]||0.6
                     const sD=parseDate(r.start), eD=parseDate(r.end)
                     const barL = zoom==='week'?(diffDays(minD,sD)/7)*CELL:((sD-minD)/(maxD-minD))*totalW
@@ -607,7 +584,7 @@ function GanttPanel({ projects, projectKey }) {
                         {/* Bar */}
                         <div
                           onMouseDown={e=>onBarMouseDown(e,r.id,'move')}
-                          style={{ position:'absolute', left:barL, top:10, height:24, width:barW, background:color, opacity:op, borderRadius:6, display:'flex', alignItems:'center', padding:'0 8px', fontSize:10, fontWeight:500, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', zIndex:2, cursor:'grab', userSelect:'none' }}>
+                          style={{ position:'absolute', left:barL, top:10, height:24, width:barW, background:color, backgroundImage:STATUS_PATTERNS[r.status]||'none', opacity:op, borderRadius:6, display:'flex', alignItems:'center', padding:'0 8px', fontSize:10, fontWeight:500, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', zIndex:2, cursor:'grab', userSelect:'none' }}>
                           {r.task}
                           {/* Resize handle */}
                           <div
@@ -626,8 +603,8 @@ function GanttPanel({ projects, projectKey }) {
       )}
 
       <div style={{ display:'flex', gap:12, marginTop:10, flexWrap:'wrap', alignItems:'center' }}>
-        {Object.entries(PROJECT_COLORS).map(([proj,color])=>(<div key={proj} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:10, height:10, borderRadius:2, background:color }}></div>{proj}</div>))}
-        {[['Listo',1],['En curso',0.85],['Pendiente',0.55],['Bloqueado',0.4]].map(([l,op])=>(<div key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:10, height:10, borderRadius:2, background:'#888', opacity:op }}></div>{l}</div>))}
+        {[...new Set(rows.map(r=>r.project||'General'))].map((proj,i)=>(<div key={proj} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:10, height:10, borderRadius:2, background:getProjectColor(proj,projects) }}></div>{proj}</div>))}
+        {[['Listo','done','#1D9E75'],['En curso','active','#185FA5'],['Pendiente','pending','#854F0B'],['Bloqueado','blocked','#A32D2D']].map(([l,k,c])=>(<div key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:24, height:10, borderRadius:2, background:c, backgroundImage:STATUS_PATTERNS[k]||'none', opacity:STATUS_OP[k]||0.5 }}></div>{l}</div>))}
         <div style={{ fontSize:11, color:'var(--text3)', marginLeft:'auto' }}>Clic en una tarea para editar fechas</div>
       </div>
     </div>
