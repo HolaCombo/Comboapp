@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useSupabaseTable } from './useSupabase'
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 function useTheme() {
@@ -712,52 +713,44 @@ function CorteView({ corte, onEdit, onDelete }) {
 
 // ─── Notas compartidas ────────────────────────────────────────────────────────
 function NotasPanel({ user, projects }) {
-  const [notas, setNotas] = useLS('notas_compartidas', [])
+  const { data: notas, insert: insertNota, remove: removeNota } = useSupabaseTable('notas', 'notas_compartidas', [])
   const [proyecto, setProyecto] = useState('todos')
   const [texto, setTexto] = useState('')
   const textareaRef = useRef()
 
-  const send = () => {
+  const send = async () => {
     if (!texto.trim()) return
-    setNotas(n=>[...n, {
-      id: Date.now(),
-      user: user.name,
-      texto: texto.trim(),
-      proyecto: proyecto==='todos'?'General':proyecto,
-      fecha: new Date().toLocaleString('es-MX', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }),
-      ts: Date.now()
-    }])
+    const fecha = new Date().toLocaleString('es-MX', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+    await insertNota({ user_name: user.name, texto: texto.trim(), proyecto: proyecto==='todos'?'General':proyecto, fecha })
     setTexto('')
   }
 
-  const remove = id => setNotas(n=>n.filter(x=>x.id!==id))
+  const remove = id => removeNota(id)
   const visible = proyecto==='todos' ? notas : notas.filter(n=>n.proyecto===proyecto)
   const USER_COLORS = { 'Admin':'#1D9E75', 'Animador 1':'#185FA5', 'Artista 1':'#854F0B' }
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 132px)' }}>
-      {/* Filtro proyecto */}
       <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}>
         <button style={{ padding:'5px 14px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:proyecto==='todos'?'var(--green)':'transparent', color:proyecto==='todos'?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setProyecto('todos')}>Todos</button>
         {projects.map(p=>(
           <button key={p.id} style={{ padding:'5px 14px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:proyecto===p.name?'var(--green)':'transparent', color:proyecto===p.name?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setProyecto(p.name)}>{p.name}</button>
         ))}
       </div>
-
-      {/* Lista de notas */}
       <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
         {visible.length===0&&<div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>Sin notas aún. ¡Escribe la primera!</div>}
         {[...visible].reverse().map(n=>{
-          const color = USER_COLORS[n.user]||'#888'
-          const isMe = n.user===user.name
+          const nombre = n.user_name || n.user || '?'
+          const color = USER_COLORS[nombre]||'#888'
+          const isMe = nombre===user.name
           return (
             <div key={n.id} style={{ display:'flex', flexDirection: isMe?'row-reverse':'row', gap:10, alignItems:'flex-start' }}>
               <div style={{ width:32, height:32, borderRadius:'50%', background:color+'22', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:500, color, flexShrink:0 }}>
-                {n.user.charAt(0)}
+                {nombre.charAt(0)}
               </div>
               <div style={{ maxWidth:'70%' }}>
                 <div style={{ display:'flex', gap:8, alignItems:'baseline', marginBottom:4, flexDirection: isMe?'row-reverse':'row' }}>
-                  <span style={{ fontSize:11, fontWeight:500, color }}>{n.user}</span>
+                  <span style={{ fontSize:11, fontWeight:500, color }}>{nombre}</span>
                   <span style={{ fontSize:10, color:'var(--text3)' }}>{n.fecha}</span>
                   <span style={{ fontSize:10, padding:'1px 6px', borderRadius:20, background:'var(--bg3)', color:'var(--text3)' }}>{n.proyecto}</span>
                 </div>
@@ -808,8 +801,8 @@ export default function App() {
   const [theme, setTheme] = useTheme()
   const [user, setUser] = useState(null)
   const [active, setActive] = useState('dashboard')
-  const [projects, setProjects] = useLS('projects', seedProjects)
-  const [tasks] = useLS('tracking_tasks', seedTasks)
+  const { data: projects, insert: insertProject } = useSupabaseTable('projects', 'projects', seedProjects)
+  const { data: tasks } = useSupabaseTable('tasks', 'tracking_tasks', seedTasks)
   const [currentProject, setCurrentProject] = useState(0)
   const [showModal, setShowModal] = useState(false)
   const [newProj, setNewProj] = useState({ name:'', director:'', duration:'' })
@@ -822,7 +815,7 @@ export default function App() {
 
   const visiblePanels = PANELS.filter(p => !p.adminOnly || user.role==='admin')
   const groups = [...new Set(visiblePanels.map(p=>p.group))]
-  const createProject = () => { if(!newProj.name.trim()) return; setProjects(p=>[...p,{id:Date.now(),name:newProj.name,director:newProj.director,duration:newProj.duration,progress:0}]); setNewProj({name:'',director:'',duration:''}); setShowModal(false) }
+  const createProject = async () => { if(!newProj.name.trim()) return; await insertProject({ name:newProj.name, director:newProj.director, duration:newProj.duration, progress:0 }); setNewProj({name:'',director:'',duration:''}); setShowModal(false) }
 
   const renderPanel = () => {
     switch(active) {
