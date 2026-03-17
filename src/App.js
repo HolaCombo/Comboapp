@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { useSupabaseTable, uploadFile, deleteFile } from './useSupabase'
+import { useSupabaseTable, useSupabaseDoc, uploadFile, deleteFile } from './useSupabase'
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 function useTheme() {
@@ -115,8 +115,7 @@ function Dashboard({ projects, tasks }) {
 }
 
 function ScriptPanel({ projectKey }) {
-  const lsKeyS = `script_lines_${projectKey}`
-  const [lines, setLines] = useLS(lsKeyS, [
+  const [lines, setLines] = useSupabaseDoc('scripts', projectKey, [
     { type:'scene', text:'INT. DEPARTAMENTO - DÍA' },
     { type:'action', text:'El sol entra por las persianas. VALENTINA (28) despierta sobresaltada.' },
     { type:'character', text:'VALENTINA' },
@@ -124,9 +123,9 @@ function ScriptPanel({ projectKey }) {
     { type:'dialogue', text:'¿Las ocho? No puede ser.' },
   ])
   const typeStyles = { scene:{ fontWeight:'bold', textTransform:'uppercase', marginTop:16, fontFamily:"'DM Mono',monospace" }, action:{ marginTop:4 }, character:{ textAlign:'center', fontWeight:'bold', marginTop:12 }, dialogue:{ margin:'0 80px' }, parenthetical:{ margin:'0 100px', fontStyle:'italic', color:'var(--text2)' } }
-  const add = type => setLines(l=>[...l,{type,text:''}])
-  const update = (i,text) => setLines(l=>l.map((x,idx)=>idx===i?{...x,text}:x))
-  const remove = i => setLines(l=>l.filter((_,idx)=>idx!==i))
+  const add = type => setLines([...lines, {type,text:''}])
+  const update = (i,text) => setLines(lines.map((x,idx)=>idx===i?{...x,text}:x))
+  const remove = i => setLines(lines.filter((_,idx)=>idx!==i))
   return (
     <div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
@@ -154,8 +153,7 @@ function ScriptPanel({ projectKey }) {
 }
 
 function BreakdownPanel({ projectKey }) {
-  const lsKey = `breakdown_rows_${projectKey}`
-  const [rows, setRows] = useLS(lsKey, seedBreakdown)
+  const [rows, setRows] = useSupabaseDoc('breakdowns', projectKey, [])
   const [mode, setMode] = useState('arte')
   const [importing, setImporting] = useState(false)
   const artistColor = name => { const idx = ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
@@ -249,8 +247,7 @@ function BreakdownPanel({ projectKey }) {
 }
 
 function StoryboardPanel({ projectKey }) {
-  const lsKey = `storyboard_panels_${projectKey}`
-  const [panels, setPanels] = useLS(lsKey, seedPanels)
+  const [panels, setPanels] = useSupabaseDoc('storyboards', projectKey, [])
   const [view, setView] = useState('cards') // cards | table
   const [importing, setImporting] = useState(false)
 
@@ -403,8 +400,8 @@ function StoryboardPanel({ projectKey }) {
 }
 
 function GanttPanel({ projects, projectKey }) {
-  const lsKeyG = `gantt_rows_${projectKey}`
-  const [rows, setRows] = useLS(lsKeyG, seedGantt)
+  const { data: rows, insert: insertRow, update: updateRowDB, remove: removeRowDB } = useSupabaseTable('gantt_tasks', `gantt_rows_${projectKey}`, [], 'created_at')
+  const filteredRows = rows.filter(r => (r.project_key || r.project_key === '') ? r.project_key === projectKey : true)
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
   const [editingRow, setEditingRow] = useState(null)
@@ -421,9 +418,19 @@ function GanttPanel({ projects, projectKey }) {
   const STATUS_PATTERNS = { done:'none', active:'none', pending:'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.3) 4px, rgba(255,255,255,0.3) 6px)', blocked:'repeating-linear-gradient(90deg, transparent, transparent 4px, rgba(255,255,255,0.4) 4px, rgba(255,255,255,0.4) 6px)' }
   const CELL = zoom==='week' ? 36 : 110
 
-  const addRow = () => { if(!newRow.task||!newRow.start||!newRow.end) return; setRows(r=>[...r,{...newRow,id:Date.now()}]); setShowForm(false) }
-  const remove = id => setRows(r=>r.filter(x=>x.id!==id))
-  const updateRow = (id, changes) => setRows(r=>r.map(x=>x.id===id?{...x,...changes}:x))
+  const addRow = async () => { if(!newRow.task||!newRow.start||!newRow.end) return; await insertRow({task:newRow.task, start_date:newRow.start, end_date:newRow.end, assignee:newRow.assignee, status:newRow.status, project_key:projectKey}); setShowForm(false) }
+  const remove = id => removeRowDB(id)
+  const updateRow = (id, changes) => {
+    const dbChanges = {}
+    if(changes.task!==undefined) dbChanges.task=changes.task
+    if(changes.start!==undefined) dbChanges.start_date=changes.start
+    if(changes.end!==undefined) dbChanges.end_date=changes.end
+    if(changes.assignee!==undefined) dbChanges.assignee=changes.assignee
+    if(changes.status!==undefined) dbChanges.status=changes.status
+    if(Object.keys(dbChanges).length) updateRowDB(id, dbChanges)
+  }
+  // Normalize: map start_date/end_date → start/end for display
+  const rows = filteredRows.map(r => ({...r, start: r.start_date||r.start||'', end: r.end_date||r.end||''}))
 
   const isValidDate = s => s && s.match(/^\d{4}-\d{2}-\d{2}$/) && !isNaN(new Date(s))
   const validRows = rows.filter(r=>isValidDate(r.start)&&isValidDate(r.end))
@@ -613,8 +620,9 @@ function GanttPanel({ projects, projectKey }) {
 
 
 function CalendarPanel({ projectKey }) {
-  const lsKey = `cal_events_${projectKey}`
-  const [events, setEvents] = useLS(lsKey, {})
+  const { data: calRows, insert: insertEvent, remove: removeEvent } = useSupabaseTable('calendar_events', `cal_events_${projectKey}`, [], 'created_at')
+  const filteredCalRows = calRows.filter(r => r.project_key === projectKey)
+  const events = filteredCalRows.reduce((acc, r) => { acc[r.event_date] = r.event_name; return acc }, {})
   const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState(new Date().getMonth())
   const [adding, setAdding] = useState(null)
@@ -655,8 +663,19 @@ function CalendarPanel({ projectKey }) {
         <input style={iStyle} value={newEvt} onChange={e=>setNewEvt(e.target.value)} placeholder="Nombre del evento..." autoFocus />
         <div style={{ display:'flex', gap:8, marginTop:12, justifyContent:'flex-end' }}>
           <button style={btnS} onClick={()=>setAdding(null)}>Cancelar</button>
-          {events[adding]&&<button style={{ ...btnS, color:'var(--danger)' }} onClick={()=>{setEvents(ev=>{const n={...ev};delete n[adding];return n});setAdding(null)}}>Eliminar</button>}
-          <button style={btnP} onClick={()=>{if(newEvt.trim())setEvents(ev=>({...ev,[adding]:newEvt.trim()}));setAdding(null)}}>Guardar</button>
+          {events[adding]&&<button style={{ ...btnS, color:'var(--danger)' }} onClick={()=>{
+            const existing = filteredCalRows.find(r=>r.event_date===adding)
+            if(existing) removeEvent(existing.id)
+            setAdding(null)
+          }}>Eliminar</button>}
+          <button style={btnP} onClick={async ()=>{
+            if(newEvt.trim()) {
+              const existing = filteredCalRows.find(r=>r.event_date===adding)
+              if(existing) await removeEvent(existing.id)
+              await insertEvent({event_date:adding, event_name:newEvt.trim(), project_key:projectKey})
+            }
+            setAdding(null)
+          }}>Guardar</button>
         </div>
       </Modal>
     </div>
@@ -725,11 +744,10 @@ function BudgetPanel({ projectKey }) {
 }
 
 function TrackingPanel({ projectKey }) {
-  const lsKeyT = `tracking_tasks_${projectKey}`
-  const [tasks, setTasks] = useLS(lsKeyT, seedTasks)
-  const insertTask = row => setTasks(t=>[...t,{...row,id:Date.now()}])
-  const updateTask = (id,ch) => setTasks(t=>t.map(x=>x.id===id?{...x,...ch}:x))
-  const removeTask = id => setTasks(t=>t.filter(x=>x.id!==id))
+  const { data: allTasks, insert: insertTaskDB, update: updateTask, remove: removeTaskDB } = useSupabaseTable('tracking', `tracking_${projectKey}`, [], 'created_at')
+  const tasks = allTasks.filter(r => !r.project_key || r.project_key === projectKey)
+  const insertTask = row => insertTaskDB({...row, project_key: projectKey})
+  const removeTask = id => removeTaskDB(id)
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(null)
   const [newName, setNewName] = useState('')
