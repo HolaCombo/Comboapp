@@ -1060,7 +1060,8 @@ export default function App() {
   const createProject = async () => { if(!newProj.name.trim()) return; await insertProject({ name:newProj.name, director:newProj.director, duration:newProj.duration, progress:0 }); setNewProj({name:'',director:'',duration:''}); setShowModal(false) }
 
   const proj = projects[currentProject]
-  const projectKey = proj ? `p${proj.id||currentProject}` : `p${currentProject}`
+  // Use project name as stable key across all devices
+  const projectKey = proj ? proj.name.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,30) : `proj_${currentProject}`
 
   const renderPanel = () => {
     switch(active) {
@@ -1087,7 +1088,7 @@ export default function App() {
           <div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px' }}>Combo<span style={{ color:'var(--green)' }}>App</span></div>
           <div style={{ marginTop:10 }}>
             <div style={{ fontSize:10, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:4 }}>Proyecto activo</div>
-            <select style={{ width:'100%', padding:'6px 8px', fontSize:12, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', cursor:'pointer' }} value={currentProject} onChange={e=>setCurrentProject(Number(e.target.value))}>
+            <select style={{ width:'100%', padding:'6px 8px', fontSize:12, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', cursor:'pointer' }} value={currentProject} onChange={e=>{setCurrentProject(Number(e.target.value));setActive('dashboard')}}>
               {projects.map((p,i)=><option key={p.id} value={i}>{p.name}</option>)}
             </select>
           </div>
