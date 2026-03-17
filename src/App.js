@@ -560,8 +560,239 @@ function FilesPanel() {
   )
 }
 
+
+// ─── Mi Semana ────────────────────────────────────────────────────────────────
+const SEMAFORO = [
+  { value:'rojo', label:'🔴 Urgente', color:'#E24B4A' },
+  { value:'amarillo', label:'🟡 En proceso', color:'#EF9F27' },
+  { value:'verde', label:'🟢 Listo', color:'#1D9E75' },
+]
+
+function MiSemanaPanel({ user }) {
+  const [cortes, setCortes] = useLS(`misemana_${user.id}`, [])
+  const [showNew, setShowNew] = useState(false)
+  const [currentCorte, setCurrentCorte] = useState(null)
+  const [editingCorte, setEditingCorte] = useState(null)
+
+  const newCorte = () => {
+    const hoy = new Date().toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
+    const corte = { id:Date.now(), fecha:hoy, proyectos:[] }
+    setEditingCorte(corte)
+    setShowNew(true)
+  }
+
+  const saveCorte = (corte) => {
+    setCortes(c => {
+      const exists = c.find(x => x.id===corte.id)
+      return exists ? c.map(x=>x.id===corte.id?corte:x) : [corte, ...c]
+    })
+    setShowNew(false)
+    setEditingCorte(null)
+    setCurrentCorte(corte.id)
+  }
+
+  const deleteCorte = id => { setCortes(c=>c.filter(x=>x.id!==id)); if(currentCorte===id) setCurrentCorte(null) }
+
+  const activeCorte = cortes.find(c=>c.id===currentCorte) || cortes[0]
+
+  return (
+    <div style={{ display:'flex', gap:16, height:'calc(100vh - 132px)' }}>
+      {/* Sidebar de cortes */}
+      <div style={{ width:200, minWidth:200, display:'flex', flexDirection:'column', gap:8 }}>
+        <button style={{ ...btnP, width:'100%' }} onClick={newCorte}>+ Nuevo corte</button>
+        <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:6 }}>
+          {cortes.map(c=>(
+            <div key={c.id} onClick={()=>setCurrentCorte(c.id)}
+              style={{ background: currentCorte===c.id||(!currentCorte&&cortes[0]?.id===c.id)?'var(--green-light)':'var(--bg)', border:`0.5px solid ${currentCorte===c.id?'var(--green)':'var(--border)'}`, borderRadius:10, padding:'10px 12px', cursor:'pointer' }}>
+              <div style={{ fontSize:12, fontWeight:500, color: currentCorte===c.id?'var(--green-dark)':'var(--text)' }}>{c.fecha}</div>
+              <div style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>{c.proyectos?.length||0} proyectos</div>
+            </div>
+          ))}
+          {cortes.length===0 && <div style={{ fontSize:12, color:'var(--text3)', textAlign:'center', padding:20 }}>Sin cortes aún</div>}
+        </div>
+      </div>
+
+      {/* Contenido del corte */}
+      <div style={{ flex:1, overflowY:'auto' }}>
+        {showNew && editingCorte ? (
+          <CorteEditor corte={editingCorte} onSave={saveCorte} onCancel={()=>{setShowNew(false);setEditingCorte(null)}} />
+        ) : activeCorte ? (
+          <CorteView corte={activeCorte} onEdit={()=>{setEditingCorte(activeCorte);setShowNew(true)}} onDelete={()=>deleteCorte(activeCorte.id)} />
+        ) : (
+          <div style={{ textAlign:'center', padding:60, color:'var(--text3)', fontSize:13 }}>Crea tu primer corte semanal</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CorteEditor({ corte, onSave, onCancel }) {
+  const [fecha, setFecha] = useState(corte.fecha)
+  const [proyectos, setProyectos] = useState(corte.proyectos||[])
+
+  const addProyecto = () => setProyectos(p=>[...p,{ id:Date.now(), nombre:'', semaforo:'amarillo', tareas:[] }])
+  const removeProyecto = id => setProyectos(p=>p.filter(x=>x.id!==id))
+  const updateProyecto = (id,key,val) => setProyectos(p=>p.map(x=>x.id===id?{...x,[key]:val}:x))
+  const addTarea = (projId) => setProyectos(p=>p.map(x=>x.id===projId?{...x,tareas:[...x.tareas,{id:Date.now(),texto:'',responsable:''}]}:x))
+  const removeTarea = (projId,tareaId) => setProyectos(p=>p.map(x=>x.id===projId?{...x,tareas:x.tareas.filter(t=>t.id!==tareaId)}:x))
+  const updateTarea = (projId,tareaId,key,val) => setProyectos(p=>p.map(x=>x.id===projId?{...x,tareas:x.tareas.map(t=>t.id===tareaId?{...t,[key]:val}:t)}:x))
+
+  return (
+    <div>
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20 }}>
+        <input style={{ ...iStyle, flex:1, fontSize:14, fontWeight:500 }} value={fecha} onChange={e=>setFecha(e.target.value)} placeholder="Fecha del corte..." />
+        <button style={btnP} onClick={()=>onSave({...corte,fecha,proyectos})}>Guardar corte</button>
+        <button style={btnS} onClick={onCancel}>Cancelar</button>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        {proyectos.map(proj=>(
+          <div key={proj.id} style={{ ...card, borderLeft:`3px solid ${SEMAFORO.find(s=>s.value===proj.semaforo)?.color||'#888'}`, marginBottom:0 }}>
+            <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:12 }}>
+              <select value={proj.semaforo} onChange={e=>updateProyecto(proj.id,'semaforo',e.target.value)}
+                style={{ ...iStyle, width:140, marginBottom:0, fontWeight:500 }}>
+                {SEMAFORO.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+              <input value={proj.nombre} onChange={e=>updateProyecto(proj.id,'nombre',e.target.value)}
+                style={{ ...iStyle, flex:1, marginBottom:0, fontWeight:500 }} placeholder="Nombre del proyecto..." />
+              <button style={btnD} onClick={()=>removeProyecto(proj.id)}>✕</button>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:10 }}>
+              {proj.tareas.map(t=>(
+                <div key={t.id} style={{ display:'flex', gap:8, alignItems:'center' }}>
+                  <div style={{ width:6, height:6, borderRadius:'50%', background:'var(--text3)', flexShrink:0 }}></div>
+                  <input value={t.texto} onChange={e=>updateTarea(proj.id,t.id,'texto',e.target.value)}
+                    style={{ ...iStyle, flex:1, marginBottom:0, fontSize:12 }} placeholder="Tarea o nota..." />
+                  <input value={t.responsable} onChange={e=>updateTarea(proj.id,t.id,'responsable',e.target.value)}
+                    style={{ ...iStyle, width:100, marginBottom:0, fontSize:11 }} placeholder="@quien" />
+                  <button style={btnD} onClick={()=>removeTarea(proj.id,t.id)}>✕</button>
+                </div>
+              ))}
+            </div>
+            <button style={{ ...btnS, fontSize:11 }} onClick={()=>addTarea(proj.id)}>+ Tarea</button>
+          </div>
+        ))}
+      </div>
+      <button style={{ ...btnS, marginTop:12, width:'100%' }} onClick={addProyecto}>+ Agregar proyecto</button>
+    </div>
+  )
+}
+
+function CorteView({ corte, onEdit, onDelete }) {
+  return (
+    <div>
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20 }}>
+        <div style={{ fontSize:15, fontWeight:500, flex:1 }}>Corte — {corte.fecha}</div>
+        <button style={btnS} onClick={onEdit}>Editar</button>
+        <button style={{ ...btnS, color:'var(--danger)', borderColor:'var(--danger)' }} onClick={onDelete}>Eliminar</button>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        {(corte.proyectos||[]).map(proj=>{
+          const sem = SEMAFORO.find(s=>s.value===proj.semaforo)
+          return (
+            <div key={proj.id} style={{ ...card, borderLeft:`3px solid ${sem?.color||'#888'}`, marginBottom:0 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                <span style={{ fontSize:16 }}>{sem?.label.split(' ')[0]}</span>
+                <span style={{ fontSize:14, fontWeight:500 }}>{proj.nombre}</span>
+              </div>
+              {(proj.tareas||[]).map(t=>(
+                <div key={t.id} style={{ display:'flex', gap:8, alignItems:'baseline', padding:'3px 0' }}>
+                  <div style={{ width:5, height:5, borderRadius:'50%', background:'var(--text3)', flexShrink:0, marginTop:6 }}></div>
+                  <span style={{ fontSize:13, flex:1, color:'var(--text)' }}>{t.texto}</span>
+                  {t.responsable&&<span style={{ fontSize:11, color:'var(--green-dark)', background:'var(--green-light)', padding:'1px 7px', borderRadius:20 }}>{t.responsable}</span>}
+                </div>
+              ))}
+            </div>
+          )
+        })}
+        {(!corte.proyectos||corte.proyectos.length===0)&&<div style={{ fontSize:13, color:'var(--text3)', textAlign:'center', padding:40 }}>Sin proyectos en este corte</div>}
+      </div>
+    </div>
+  )
+}
+
+// ─── Notas compartidas ────────────────────────────────────────────────────────
+function NotasPanel({ user, projects }) {
+  const [notas, setNotas] = useLS('notas_compartidas', [])
+  const [proyecto, setProyecto] = useState('todos')
+  const [texto, setTexto] = useState('')
+  const textareaRef = useRef()
+
+  const send = () => {
+    if (!texto.trim()) return
+    setNotas(n=>[...n, {
+      id: Date.now(),
+      user: user.name,
+      texto: texto.trim(),
+      proyecto: proyecto==='todos'?'General':proyecto,
+      fecha: new Date().toLocaleString('es-MX', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }),
+      ts: Date.now()
+    }])
+    setTexto('')
+  }
+
+  const remove = id => setNotas(n=>n.filter(x=>x.id!==id))
+  const visible = proyecto==='todos' ? notas : notas.filter(n=>n.proyecto===proyecto)
+  const USER_COLORS = { 'Admin':'#1D9E75', 'Animador 1':'#185FA5', 'Artista 1':'#854F0B' }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 132px)' }}>
+      {/* Filtro proyecto */}
+      <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}>
+        <button style={{ padding:'5px 14px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:proyecto==='todos'?'var(--green)':'transparent', color:proyecto==='todos'?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setProyecto('todos')}>Todos</button>
+        {projects.map(p=>(
+          <button key={p.id} style={{ padding:'5px 14px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:proyecto===p.name?'var(--green)':'transparent', color:proyecto===p.name?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setProyecto(p.name)}>{p.name}</button>
+        ))}
+      </div>
+
+      {/* Lista de notas */}
+      <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
+        {visible.length===0&&<div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>Sin notas aún. ¡Escribe la primera!</div>}
+        {[...visible].reverse().map(n=>{
+          const color = USER_COLORS[n.user]||'#888'
+          const isMe = n.user===user.name
+          return (
+            <div key={n.id} style={{ display:'flex', flexDirection: isMe?'row-reverse':'row', gap:10, alignItems:'flex-start' }}>
+              <div style={{ width:32, height:32, borderRadius:'50%', background:color+'22', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:500, color, flexShrink:0 }}>
+                {n.user.charAt(0)}
+              </div>
+              <div style={{ maxWidth:'70%' }}>
+                <div style={{ display:'flex', gap:8, alignItems:'baseline', marginBottom:4, flexDirection: isMe?'row-reverse':'row' }}>
+                  <span style={{ fontSize:11, fontWeight:500, color }}>{n.user}</span>
+                  <span style={{ fontSize:10, color:'var(--text3)' }}>{n.fecha}</span>
+                  <span style={{ fontSize:10, padding:'1px 6px', borderRadius:20, background:'var(--bg3)', color:'var(--text3)' }}>{n.proyecto}</span>
+                </div>
+                <div style={{ background: isMe?'var(--green-light)':'var(--bg)', border:'0.5px solid var(--border)', borderRadius: isMe?'14px 14px 4px 14px':'14px 14px 14px 4px', padding:'10px 14px', fontSize:13, color:'var(--text)', lineHeight:1.5, position:'relative' }}>
+                  {n.texto}
+                  {isMe&&<button onClick={()=>remove(n.id)} style={{ position:'absolute', top:4, right:6, background:'none', border:'none', cursor:'pointer', fontSize:10, color:'var(--text3)', opacity:0.6 }}>✕</button>}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Input */}
+      <div style={{ display:'flex', gap:8, alignItems:'flex-end', background:'var(--bg)', border:'0.5px solid var(--border2)', borderRadius:14, padding:'10px 12px' }}>
+        <select value={proyecto} onChange={e=>setProyecto(e.target.value)}
+          style={{ padding:'6px 8px', fontSize:11, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', cursor:'pointer', flexShrink:0 }}>
+          <option value="todos">General</option>
+          {projects.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+        </select>
+        <textarea ref={textareaRef} value={texto} onChange={e=>setTexto(e.target.value)}
+          onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()} }}
+          placeholder="Escribe una nota... (Enter para enviar, Shift+Enter para nueva línea)" rows={1}
+          style={{ flex:1, border:'none', background:'transparent', resize:'none', fontSize:13, color:'var(--text)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5 }}
+          onInput={e=>{e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px'}} />
+        <button style={{ ...btnP, flexShrink:0 }} onClick={send}>Enviar</button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Panels list & App ────────────────────────────────────────────────────────
 const PANELS = [
   { id:'dashboard', label:'Dashboard', group:'General' },
+  { id:'misemana', label:'Mi Semana', group:'General' },
   { id:'script', label:'Guión', group:'Preproducción' },
   { id:'breakdown', label:'Breakdown', group:'Preproducción' },
   { id:'storyboard', label:'Storyboard', group:'Preproducción' },
@@ -569,6 +800,7 @@ const PANELS = [
   { id:'calendar', label:'Cronograma', group:'Producción' },
   { id:'budget', label:'Presupuesto', group:'Finanzas', adminOnly:true },
   { id:'tracking', label:'Seguimiento', group:'Equipo' },
+  { id:'notas', label:'Notas del equipo', group:'Equipo' },
   { id:'files', label:'Archivos', group:'Equipo' },
 ]
 
@@ -591,9 +823,11 @@ export default function App() {
   const visiblePanels = PANELS.filter(p => !p.adminOnly || user.role==='admin')
   const groups = [...new Set(visiblePanels.map(p=>p.group))]
   const createProject = () => { if(!newProj.name.trim()) return; setProjects(p=>[...p,{id:Date.now(),name:newProj.name,director:newProj.director,duration:newProj.duration,progress:0}]); setNewProj({name:'',director:'',duration:''}); setShowModal(false) }
+
   const renderPanel = () => {
     switch(active) {
       case 'dashboard': return <Dashboard projects={projects} tasks={tasks} />
+      case 'misemana': return <MiSemanaPanel user={user} />
       case 'script': return <ScriptPanel />
       case 'breakdown': return <BreakdownPanel />
       case 'storyboard': return <StoryboardPanel />
@@ -601,10 +835,12 @@ export default function App() {
       case 'calendar': return <CalendarPanel />
       case 'budget': return user.role==='admin'?<BudgetPanel />:<div style={{ padding:40, textAlign:'center', color:'var(--text3)' }}>Sin acceso</div>
       case 'tracking': return <TrackingPanel />
+      case 'notas': return <NotasPanel user={user} projects={projects} />
       case 'files': return <FilesPanel />
       default: return null
     }
   }
+
   const current = visiblePanels.find(p=>p.id===active)
   return (
     <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg2)' }}>
@@ -642,7 +878,7 @@ export default function App() {
           <div style={{ display:'flex', gap:8, alignItems:'center' }}>
             <div style={{ fontSize:12, color:'var(--text3)', marginRight:4 }}>{projects[currentProject]?.name}</div>
             <button style={btnS} onClick={()=>setShowModal(true)}>+ Proyecto</button>
-            <button onClick={()=>setTheme(t=>t==='light'?'dark':'light')} style={{ padding:'6px 10px', fontSize:14, borderRadius:8, border:'0.5px solid var(--border2)', background:'transparent', color:'var(--text2)', cursor:'pointer' }} title="Cambiar tema">
+            <button onClick={()=>setTheme(t=>t==='light'?'dark':'light')} style={{ padding:'6px 10px', fontSize:14, borderRadius:8, border:'0.5px solid var(--border2)', background:'transparent', color:'var(--text2)', cursor:'pointer' }}>
               {theme==='light'?'🌙':'☀️'}
             </button>
           </div>
