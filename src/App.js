@@ -400,8 +400,8 @@ function StoryboardPanel({ projectKey }) {
 }
 
 function GanttPanel({ projects, projectKey }) {
-  const { data: rows, insert: insertRow, update: updateRowDB, remove: removeRowDB } = useSupabaseTable('gantt_tasks', `gantt_rows_${projectKey}`, [], 'created_at')
-  const filteredRows = rows.filter(r => (r.project_key || r.project_key === '') ? r.project_key === projectKey : true)
+  const { data: rawRows, insert: insertRow, update: updateRowDB, remove: removeRowDB } = useSupabaseTable('gantt_tasks', `gantt_rows_${projectKey}`, [], 'created_at')
+  const filteredRows = rawRows.filter(r => !r.project_key || r.project_key === projectKey)
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
   const [editingRow, setEditingRow] = useState(null)
