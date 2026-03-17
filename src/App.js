@@ -15,12 +15,9 @@ function useLS(key, init) {
 }
 
 const USERS = [
-  { id:1, name:'Admin', username:'Gabs', password:'Gabs2026', role:'admin' },
-  { id:2, name:'Animador 1', username:'combo3', password:'combo3pass', role:'member' },
-  { id:3, name:'Animador 2', username:'combo4', password:'combo4pass', role:'member' },
-  { id:4, name:'Artista 1', username:'combo1', password:'combo1pass', role:'member' },
-  { id:5, name:'Artista 2', username:'combo2', password:'combo2pass', role:'member' },
-  { id:6, name:'Project 1', username:'combo5', password:'combo5pass', role:'member' },
+  { id:1, name:'Admin', username:'admin', password:'combo2025', role:'admin' },
+  { id:2, name:'Animador 1', username:'anim1', password:'anim1pass', role:'member' },
+  { id:3, name:'Artista 1', username:'arte1', password:'arte1pass', role:'member' },
 ]
 
 const iStyle = { padding:'7px 10px', fontSize:13, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', width:'100%', outline:'none', marginBottom:2 }
@@ -435,91 +432,208 @@ function GanttPanel({ projects, projectKey }) {
   const [rows, setRows] = useLS(lsKeyG, seedGantt)
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
+  const [editingRow, setEditingRow] = useState(null)
   const [newRow, setNewRow] = useState({ task:'', start:'', end:'', assignee:'', status:'pending', project:projects[0]?.name||'' })
-  const addRow = () => { if(!newRow.task||!newRow.start||!newRow.end) return; setRows(r=>[...r,{...newRow,id:Date.now()}]); setShowForm(false) }
-  const remove = id => setRows(r=>r.filter(x=>x.id!==id))
-  const parseDate = s => { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d) }
+  const dragRef = useRef(null)
+  const gridRef = useRef(null)
+
+  const parseDate = s => { if(!s) return new Date(); const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d) }
   const addDays = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r }
   const diffDays = (a,b) => Math.round((b-a)/86400000)
+  const toDateStr = d => { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}` }
   const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
   const STATUS_OP = { done:1, active:0.85, pending:0.55, blocked:0.4 }
+  const CELL = zoom==='week' ? 36 : 110
+
+  const addRow = () => { if(!newRow.task||!newRow.start||!newRow.end) return; setRows(r=>[...r,{...newRow,id:Date.now()}]); setShowForm(false) }
+  const remove = id => setRows(r=>r.filter(x=>x.id!==id))
+  const updateRow = (id, changes) => setRows(r=>r.map(x=>x.id===id?{...x,...changes}:x))
+
   const validRows = rows.filter(r=>r.start&&r.end)
-  if (!validRows.length) return <div style={{ padding:40, textAlign:'center', color:'var(--text3)', fontSize:13 }}>Sin tareas con fechas.<button style={{ ...btnS, marginLeft:12 }} onClick={()=>setShowForm(true)}>+ Agregar</button></div>
-  const dates = validRows.flatMap(r=>[parseDate(r.start),parseDate(r.end)])
-  let minD = new Date(Math.min(...dates)), maxD = new Date(Math.max(...dates))
-  minD = addDays(minD,-7); maxD = addDays(maxD,14)
+  const allDates = validRows.flatMap(r=>[parseDate(r.start),parseDate(r.end)])
+  let minD = allDates.length ? new Date(Math.min(...allDates)) : new Date()
+  let maxD = allDates.length ? new Date(Math.max(...allDates)) : addDays(new Date(),60)
+  minD = addDays(minD,-7); maxD = addDays(maxD,21)
   const dow = minD.getDay(); minD = addDays(minD, dow===0?-6:1-dow)
-  const CELL = zoom==='week'?32:100
+
   const cols = []
   if(zoom==='week'){let d=new Date(minD);while(d<=maxD){cols.push(new Date(d));d=addDays(d,7)}}
   else{let d=new Date(minD.getFullYear(),minD.getMonth(),1);while(d<=maxD){cols.push(new Date(d));d=new Date(d.getFullYear(),d.getMonth()+1,1)}}
   const totalW = cols.length*CELL
   const allProjects = [...new Set(validRows.map(r=>r.project||'General'))]
+
+  const pxToDate = (px) => {
+    if(zoom==='week') return addDays(minD, Math.round((px/CELL)*7))
+    return addDays(minD, Math.round((px/totalW)*diffDays(minD,maxD)))
+  }
+
+  // Drag to move bar
+  const onBarMouseDown = (e, rowId, type) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const row = rows.find(r=>r.id===rowId)
+    if(!row) return
+    const startX = e.clientX
+    const origStart = parseDate(row.start)
+    const origEnd = parseDate(row.end)
+    const origDur = diffDays(origStart, origEnd)
+
+    dragRef.current = { rowId, type, startX, origStart, origEnd, origDur }
+
+    const onMove = (e) => {
+      if(!dragRef.current) return
+      const dx = e.clientX - dragRef.current.startX
+      const daysDelta = zoom==='week' ? Math.round((dx/CELL)*7) : Math.round((dx/totalW)*diffDays(minD,maxD))
+      if(dragRef.current.type === 'move') {
+        const newStart = addDays(dragRef.current.origStart, daysDelta)
+        const newEnd = addDays(dragRef.current.origEnd, daysDelta)
+        updateRow(rowId, { start: toDateStr(newStart), end: toDateStr(newEnd) })
+      } else if(dragRef.current.type === 'resize') {
+        const newEnd = addDays(dragRef.current.origEnd, daysDelta)
+        if(diffDays(dragRef.current.origStart, newEnd) >= 1) {
+          updateRow(rowId, { end: toDateStr(newEnd) })
+        }
+      }
+    }
+    const onUp = () => {
+      dragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   return (
     <div>
       <div style={{ display:'flex', gap:8, marginBottom:14, alignItems:'center' }}>
         {[['week','Semana'],['month','Mes']].map(([z,label])=>(
           <button key={z} style={{ padding:'5px 14px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:zoom===z?'var(--green)':'transparent', color:zoom===z?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setZoom(z)}>{label}</button>
         ))}
+        <div style={{ fontSize:11, color:'var(--text3)', marginLeft:4 }}>Arrastra las barras para mover · jala el borde derecho para redimensionar</div>
         <button style={{ ...btnS, marginLeft:'auto' }} onClick={()=>setShowForm(v=>!v)}>+ Agregar tarea</button>
       </div>
+
       {showForm&&(
         <div style={{ ...card, display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:16 }}>
           {[['task','Tarea'],['assignee','Responsable']].map(([k,l])=>(<div key={k}><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{l}</label><input style={iStyle} value={newRow[k]} onChange={e=>setNewRow(r=>({...r,[k]:e.target.value}))} /></div>))}
           <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Proyecto</label><select style={iStyle} value={newRow.project} onChange={e=>setNewRow(r=>({...r,project:e.target.value}))}>{projects.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
           {[['start','Inicio'],['end','Fin']].map(([k,l])=>(<div key={k}><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{l}</label><input type="date" style={iStyle} value={newRow[k]} onChange={e=>setNewRow(r=>({...r,[k]:e.target.value}))} /></div>))}
+          <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Estado</label><select style={iStyle} value={newRow.status} onChange={e=>setNewRow(r=>({...r,status:e.target.value}))}>{Object.entries({pending:'Pendiente',active:'En curso',done:'Listo',blocked:'Bloqueado'}).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
           <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}><button style={btnP} onClick={addRow}>Guardar</button><button style={btnS} onClick={()=>setShowForm(false)}>Cancelar</button></div>
         </div>
       )}
-      <div style={{ display:'flex', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', background:'var(--bg)' }}>
-        <div style={{ width:190, minWidth:190, borderRight:'0.5px solid var(--border)', flexShrink:0 }}>
-          <div style={{ height:36, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)' }}></div>
-          {allProjects.map(proj=>(
-            <React.Fragment key={proj}>
-              <div style={{ padding:'5px 12px', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', fontSize:11, fontWeight:500, color:'var(--text2)' }}>{proj}</div>
-              {validRows.filter(r=>(r.project||'General')===proj).map(r=>(
-                <div key={r.id} style={{ height:38, display:'flex', alignItems:'center', padding:'0 12px', borderBottom:'0.5px solid var(--border)', gap:8 }}>
-                  <div style={{ width:8, height:8, borderRadius:'50%', background:PROJECT_COLORS[r.project]||'#888', flexShrink:0, opacity:STATUS_OP[r.status]||0.6 }}></div>
-                  <div style={{ fontSize:12, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', flex:1 }}>{r.task}</div>
-                  <button style={{ ...btnD, padding:'2px 5px', fontSize:10 }} onClick={()=>remove(r.id)}>✕</button>
-                </div>
-              ))}
-            </React.Fragment>
-          ))}
-        </div>
-        <div style={{ flex:1, overflowX:'auto' }}>
-          <div style={{ minWidth:totalW }}>
-            <div style={{ height:36, display:'flex', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)' }}>
-              {cols.map((col,i)=><div key={i} style={{ width:CELL, minWidth:CELL, display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:'var(--text3)', borderRight:'0.5px solid var(--border)' }}>{zoom==='week'?`${col.getDate()} ${MONTHS[col.getMonth()]}`:MONTHS[col.getMonth()]+' '+col.getFullYear()}</div>)}
+
+      {/* Edit modal */}
+      {editingRow && (
+        <Modal open={!!editingRow} onClose={()=>setEditingRow(null)} title="Editar tarea">
+          {[['task','Tarea'],['assignee','Responsable']].map(([k,l])=>(
+            <div key={k} style={{ marginBottom:8 }}>
+              <label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{l}</label>
+              <input style={iStyle} value={editingRow[k]||''} onChange={e=>setEditingRow(r=>({...r,[k]:e.target.value}))} />
             </div>
+          ))}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+            {[['start','Inicio'],['end','Fin']].map(([k,l])=>(
+              <div key={k}>
+                <label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{l}</label>
+                <input type="date" style={iStyle} value={editingRow[k]||''} onChange={e=>setEditingRow(r=>({...r,[k]:e.target.value}))} />
+              </div>
+            ))}
+          </div>
+          <div style={{ marginBottom:12 }}>
+            <label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Estado</label>
+            <select style={iStyle} value={editingRow.status||'pending'} onChange={e=>setEditingRow(r=>({...r,status:e.target.value}))}>
+              {Object.entries({pending:'Pendiente',active:'En curso',done:'Listo',blocked:'Bloqueado'}).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+            <button style={{ ...btnS, color:'var(--danger)' }} onClick={()=>{remove(editingRow.id);setEditingRow(null)}}>Eliminar</button>
+            <button style={btnS} onClick={()=>setEditingRow(null)}>Cancelar</button>
+            <button style={btnP} onClick={()=>{updateRow(editingRow.id,editingRow);setEditingRow(null)}}>Guardar</button>
+          </div>
+        </Modal>
+      )}
+
+      {validRows.length===0 ? (
+        <div style={{ padding:40, textAlign:'center', color:'var(--text3)', fontSize:13 }}>
+          Sin tareas aún. <button style={{ ...btnS, marginLeft:8 }} onClick={()=>setShowForm(true)}>+ Agregar tarea</button>
+        </div>
+      ) : (
+        <div style={{ display:'flex', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', background:'var(--bg)' }}>
+          {/* Labels */}
+          <div style={{ width:200, minWidth:200, borderRight:'0.5px solid var(--border)', flexShrink:0 }}>
+            <div style={{ height:36, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)' }}></div>
             {allProjects.map(proj=>(
               <React.Fragment key={proj}>
-                <div style={{ height:26, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
-                {validRows.filter(r=>(r.project||'General')===proj).map(r=>{
-                  const color = PROJECT_COLORS[r.project]||'#888'
-                  const op = STATUS_OP[r.status]||0.6
-                  const sD=parseDate(r.start), eD=parseDate(r.end)
-                  const barL = zoom==='week'?(diffDays(minD,sD)/7)*CELL:((sD-minD)/(maxD-minD))*totalW
-                  const barW = zoom==='week'?Math.max(CELL*0.8,(diffDays(sD,eD)/7)*CELL):Math.max(16,((eD-sD)/(maxD-minD))*totalW)
-                  return (
-                    <div key={r.id} style={{ height:38, position:'relative', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}>
-                      {cols.map((_,i)=><div key={i} style={{ position:'absolute', left:i*CELL, top:0, bottom:0, width:CELL, borderRight:'0.5px solid var(--border)', opacity:0.2 }}></div>)}
-                      <div style={{ position:'absolute', left:barL, top:8, height:22, width:barW, background:color, opacity:op, borderRadius:6, display:'flex', alignItems:'center', padding:'0 8px', fontSize:10, fontWeight:500, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', zIndex:2 }}>{r.task}</div>
+                <div style={{ padding:'5px 12px', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', fontSize:11, fontWeight:500, color:'var(--text2)' }}>{proj}</div>
+                {validRows.filter(r=>(r.project||'General')===proj).map(r=>(
+                  <div key={r.id} style={{ height:44, display:'flex', alignItems:'center', padding:'0 12px', borderBottom:'0.5px solid var(--border)', gap:8, cursor:'pointer' }} onClick={()=>setEditingRow({...r})}>
+                    <div style={{ width:8, height:8, borderRadius:'50%', background:PROJECT_COLORS[r.project]||'#888', flexShrink:0, opacity:STATUS_OP[r.status]||0.6 }}></div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:12, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.task}</div>
+                      <div style={{ fontSize:10, color:'var(--text3)' }}>{r.start} → {r.end}</div>
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </React.Fragment>
             ))}
           </div>
+
+          {/* Grid */}
+          <div ref={gridRef} style={{ flex:1, overflowX:'auto' }}>
+            <div style={{ minWidth:totalW }}>
+              {/* Date header */}
+              <div style={{ height:36, display:'flex', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)' }}>
+                {cols.map((col,i)=>(
+                  <div key={i} style={{ width:CELL, minWidth:CELL, display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:'var(--text3)', borderRight:'0.5px solid var(--border)' }}>
+                    {zoom==='week'?`${col.getDate()} ${MONTHS[col.getMonth()]}`:MONTHS[col.getMonth()]+' '+col.getFullYear()}
+                  </div>
+                ))}
+              </div>
+
+              {allProjects.map(proj=>(
+                <React.Fragment key={proj}>
+                  <div style={{ height:26, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
+                  {validRows.filter(r=>(r.project||'General')===proj).map(r=>{
+                    const color = PROJECT_COLORS[r.project]||'#888'
+                    const op = STATUS_OP[r.status]||0.6
+                    const sD=parseDate(r.start), eD=parseDate(r.end)
+                    const barL = zoom==='week'?(diffDays(minD,sD)/7)*CELL:((sD-minD)/(maxD-minD))*totalW
+                    const barW = zoom==='week'?Math.max(CELL,(diffDays(sD,eD)/7)*CELL):Math.max(24,((eD-sD)/(maxD-minD))*totalW)
+                    return (
+                      <div key={r.id} style={{ height:44, position:'relative', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}>
+                        {cols.map((_,i)=><div key={i} style={{ position:'absolute', left:i*CELL, top:0, bottom:0, width:CELL, borderRight:'0.5px solid var(--border)', opacity:0.15 }}></div>)}
+                        {/* Bar */}
+                        <div
+                          onMouseDown={e=>onBarMouseDown(e,r.id,'move')}
+                          style={{ position:'absolute', left:barL, top:10, height:24, width:barW, background:color, opacity:op, borderRadius:6, display:'flex', alignItems:'center', padding:'0 8px', fontSize:10, fontWeight:500, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', zIndex:2, cursor:'grab', userSelect:'none' }}>
+                          {r.task}
+                          {/* Resize handle */}
+                          <div
+                            onMouseDown={e=>onBarMouseDown(e,r.id,'resize')}
+                            style={{ position:'absolute', right:0, top:0, bottom:0, width:8, cursor:'ew-resize', background:'rgba(255,255,255,0.3)', borderRadius:'0 6px 6px 0' }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
-      <div style={{ display:'flex', gap:12, marginTop:10, flexWrap:'wrap' }}>
+      )}
+
+      <div style={{ display:'flex', gap:12, marginTop:10, flexWrap:'wrap', alignItems:'center' }}>
         {Object.entries(PROJECT_COLORS).map(([proj,color])=>(<div key={proj} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:10, height:10, borderRadius:2, background:color }}></div>{proj}</div>))}
-        {[['Listo',1],['En curso',0.85],['Pendiente',0.55]].map(([l,op])=>(<div key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:10, height:10, borderRadius:2, background:'#888', opacity:op }}></div>{l}</div>))}
+        {[['Listo',1],['En curso',0.85],['Pendiente',0.55],['Bloqueado',0.4]].map(([l,op])=>(<div key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:10, height:10, borderRadius:2, background:'#888', opacity:op }}></div>{l}</div>))}
+        <div style={{ fontSize:11, color:'var(--text3)', marginLeft:'auto' }}>Clic en una tarea para editar fechas</div>
       </div>
     </div>
   )
 }
+
 
 function CalendarPanel({ projectKey }) {
   const lsKey = `cal_events_${projectKey}`
@@ -1024,118 +1138,209 @@ function NotasPanel({ user, projects, projectKey }) {
 }
 
 // ─── Panels list & App ────────────────────────────────────────────────────────
-const PANELS = [
-  { id:'dashboard', label:'Dashboard', group:'General' },
-  { id:'misemana', label:'Mi Semana', group:'General' },
-  { id:'script', label:'Guión', group:'Preproducción' },
-  { id:'breakdown', label:'Breakdown', group:'Preproducción' },
-  { id:'storyboard', label:'Storyboard', group:'Preproducción' },
-  { id:'gantt', label:'Timeline / Gantt', group:'Producción' },
-  { id:'calendar', label:'Cronograma', group:'Producción' },
-  { id:'budget', label:'Presupuesto', group:'Finanzas', adminOnly:true },
-  { id:'tracking', label:'Seguimiento', group:'Equipo' },
-  { id:'notas', label:'Notas del equipo', group:'Equipo' },
-  { id:'files', label:'Archivos', group:'Equipo' },
-]
+// ─── Transcripción ────────────────────────────────────────────────────────────
+// ─── Transcripción ────────────────────────────────────────────────────────────
+function TranscripcionPanel({ projectKey }) {
+  const lsKey = `transcripciones_${projectKey}`
+  const [items, setItems] = useLS(lsKey, [])
+  const [queue, setQueue] = useState([])
+  const [processing, setProcessing] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [mode, setMode] = useState('texto') // texto | timecodes
 
-export default function App() {
-  const [theme, setTheme] = useTheme()
-  const [user, setUser] = useState(null)
-  const [active, setActive] = useState('dashboard')
-  const { data: projects, insert: insertProject } = useSupabaseTable('projects', 'projects', seedProjects)
-  const { data: tasks } = useSupabaseTable('tasks', 'tracking_tasks', seedTasks)
-  const [currentProject, setCurrentProject] = useState(0)
-  const [showModal, setShowModal] = useState(false)
-  const [newProj, setNewProj] = useState({ name:'', director:'', duration:'' })
+  const OPENAI_KEY = process.env.REACT_APP_OPENAI_KEY
 
-  useEffect(() => { const saved = localStorage.getItem('combo_user'); if(saved) try { setUser(JSON.parse(saved)) } catch {} }, [])
-  const login = u => { setUser(u); localStorage.setItem('combo_user', JSON.stringify(u)) }
-  const logout = () => { setUser(null); localStorage.removeItem('combo_user') }
+  const fmtTC = s => {
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60)
+    return h>0 ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+  }
 
-  if (!user) return <LoginScreen onLogin={login} />
+  const buildTimecoded = (segments) => {
+    if (!segments || !segments.length) return ''
+    return segments.map(seg => `[${fmtTC(seg.start)}]  ${seg.text.trim()}`).join('\n')
+  }
 
-  const visiblePanels = PANELS.filter(p => {
-    if (p.adminOnly && user.role!=='admin') return false
-    if (p.id==='misemana' && user.role!=='admin') return false
-    return true
-  })
-  const groups = [...new Set(visiblePanels.map(p=>p.group))]
-  const createProject = async () => { if(!newProj.name.trim()) return; await insertProject({ name:newProj.name, director:newProj.director, duration:newProj.duration, progress:0 }); setNewProj({name:'',director:'',duration:''}); setShowModal(false) }
+  const addFiles = (files) => {
+    const newItems = Array.from(files).map(file => ({
+      id: Date.now() + Math.random(),
+      name: file.name,
+      size: file.size,
+      file,
+      status: 'pending',
+      text: '',
+      textTC: '',
+      duration: null,
+    }))
+    setQueue(q => [...q, ...newItems])
+  }
 
-  const proj = projects[currentProject]
-  // Use project name as stable key across all devices
-  const projectKey = proj ? proj.name.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,30) : `proj_${currentProject}`
+  const transcribeOne = async (item) => {
+    if (!OPENAI_KEY) return { ...item, status:'error', text:'No hay API key de OpenAI configurada. Agrega REACT_APP_OPENAI_KEY en Vercel.' }
+    setQueue(q => q.map(x => x.id===item.id ? {...x, status:'processing'} : x))
+    try {
+      const formData = new FormData()
+      formData.append('file', item.file, item.name)
+      formData.append('model', 'whisper-1')
+      formData.append('language', 'es')
+      formData.append('response_format', 'verbose_json')
+      formData.append('timestamp_granularities[]', 'segment')
 
-  const renderPanel = () => {
-    switch(active) {
-      case 'dashboard': return <Dashboard projects={projects} tasks={tasks} />
-      case 'misemana': return <MiSemanaPanel user={user} />
-      case 'script': return <ScriptPanel projectKey={projectKey} />
-      case 'breakdown': return <BreakdownPanel projectKey={projectKey} />
-      case 'storyboard': return <StoryboardPanel projectKey={projectKey} />
-      case 'gantt': return <GanttPanel projects={projects} projectKey={projectKey} />
-      case 'calendar': return <CalendarPanel projectKey={projectKey} />
-      case 'budget': return user.role==='admin'?<BudgetPanel projectKey={projectKey} />:<div style={{ padding:40, textAlign:'center', color:'var(--text3)' }}>Sin acceso</div>
-      case 'tracking': return <TrackingPanel projectKey={projectKey} />
-      case 'notas': return <NotasPanel user={user} projects={projects} projectKey={projectKey} />
-      case 'files': return <FilesPanel projectKey={projectKey} />
-      default: return null
+      const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${OPENAI_KEY}` },
+        body: formData,
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        return { ...item, status:'error', text: err.error?.message || 'Error al transcribir' }
+      }
+      const data = await res.json()
+      const textTC = buildTimecoded(data.segments)
+      return { ...item, status:'done', text: data.text, textTC, duration: data.duration ? Math.round(data.duration) : null }
+    } catch (err) {
+      return { ...item, status:'error', text: 'Error: ' + err.message }
     }
   }
 
-  const current = visiblePanels.find(p=>p.id===active)
+  const transcribeAll = async () => {
+    if (processing) return
+    const pending = queue.filter(x => x.status==='pending' || x.status==='error')
+    if (!pending.length) return
+    setProcessing(true)
+    for (const item of pending) {
+      const result = await transcribeOne(item)
+      setQueue(q => q.map(x => x.id===item.id ? result : x))
+      if (result.status==='done') {
+        const saved = { id: Date.now(), name: result.name, text: result.text, textTC: result.textTC, duration: result.duration, date: new Date().toLocaleDateString('es-MX'), size: result.size }
+        setItems(prev => [saved, ...prev])
+      }
+    }
+    setProcessing(false)
+  }
+
+  const removeQueue = id => setQueue(q => q.filter(x => x.id!==id))
+  const removeItem = id => setItems(prev => prev.filter(x => x.id!==id))
+  const copyText = (item) => {
+    const text = mode==='timecodes' ? (item.textTC||item.text) : item.text
+    navigator.clipboard.writeText(text)
+  }
+
+  const fmtSize = b => b > 1024*1024 ? (b/1024/1024).toFixed(1)+'MB' : (b/1024).toFixed(0)+'KB'
+  const fmtDur = s => s ? `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} min` : ''
+  const statusColor = { pending:'var(--text3)', processing:'var(--amber)', done:'var(--green)', error:'var(--danger)' }
+  const statusLabel = { pending:'Pendiente', processing:'Transcribiendo...', done:'Listo', error:'Error' }
+
   return (
-    <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg2)' }}>
-      <div style={{ width:220, minWidth:220, background:'var(--bg)', borderRight:'0.5px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden' }} className="no-print">
-        <div style={{ padding:'16px 14px', borderBottom:'0.5px solid var(--border)' }}>
-          <div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px' }}>Combo<span style={{ color:'var(--green)' }}>App</span></div>
-          <div style={{ marginTop:10 }}>
-            <div style={{ fontSize:10, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:4 }}>Proyecto activo</div>
-            <select style={{ width:'100%', padding:'6px 8px', fontSize:12, borderRadius:8, border:'0.5px solid var(--border2)', background:'var(--bg2)', color:'var(--text)', cursor:'pointer' }} value={currentProject} onChange={e=>{setCurrentProject(Number(e.target.value));setActive('dashboard')}}>
-              {projects.map((p,i)=><option key={p.id} value={i}>{p.name}</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={{ padding:8, flex:1, overflowY:'auto' }}>
-          {groups.map(group=>(
-            <React.Fragment key={group}>
-              <div style={{ fontSize:10, fontWeight:500, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', padding:'10px 8px 4px' }}>{group}</div>
-              {visiblePanels.filter(p=>p.group===group).map(p=>(
-                <div key={p.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 8px', borderRadius:8, cursor:'pointer', fontSize:13, color:active===p.id?'var(--green-dark)':'var(--text2)', background:active===p.id?'var(--green-light)':'transparent', fontWeight:active===p.id?500:400, transition:'all 0.12s' }} onClick={()=>setActive(p.id)}>
-                  {p.label}
-                  {p.adminOnly&&<span style={{ fontSize:9, background:'var(--amber-light)', color:'var(--amber)', padding:'1px 5px', borderRadius:4, marginLeft:'auto' }}>admin</span>}
-                </div>
-              ))}
-            </React.Fragment>
-          ))}
-        </div>
-        <div style={{ padding:'10px 14px', borderTop:'0.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div style={{ fontSize:12, color:'var(--text2)' }}>{user.name}</div>
-          <button style={btnD} onClick={logout}>Salir</button>
+    <div>
+      {/* Mode selector */}
+      <div style={{ display:'flex', gap:8, marginBottom:16, alignItems:'center' }}>
+        <div style={{ fontSize:12, color:'var(--text2)', marginRight:4 }}>Formato:</div>
+        {[['texto','Solo texto'],['timecodes','Con timecodes']].map(([m,label])=>(
+          <button key={m} style={{ padding:'5px 14px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:mode===m?'var(--green)':'transparent', color:mode===m?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setMode(m)}>{label}</button>
+        ))}
+        <div style={{ fontSize:11, color:'var(--text3)', marginLeft:8 }}>
+          {mode==='timecodes' ? '📍 Con marcas de tiempo por segmento' : '📄 Texto limpio para guiones'}
         </div>
       </div>
-      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-        <div style={{ padding:'0 20px', height:52, borderBottom:'0.5px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--bg)' }} className="no-print">
-          <div style={{ fontSize:14, fontWeight:500 }}>{current?.label}</div>
-          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-            <div style={{ fontSize:12, color:'var(--text3)', marginRight:4 }}>{projects[currentProject]?.name}</div>
-            <button style={btnS} onClick={()=>setShowModal(true)}>+ Proyecto</button>
-            <button onClick={()=>setTheme(t=>t==='light'?'dark':'light')} style={{ padding:'6px 10px', fontSize:14, borderRadius:8, border:'0.5px solid var(--border2)', background:'transparent', color:'var(--text2)', cursor:'pointer' }}>
-              {theme==='light'?'🌙':'☀️'}
+
+      {/* Drop zone */}
+      <div
+        onDragOver={e=>{e.preventDefault();setDragOver(true)}}
+        onDragLeave={()=>setDragOver(false)}
+        onDrop={e=>{e.preventDefault();setDragOver(false);addFiles(e.dataTransfer.files)}}
+        style={{ border:`1.5px dashed ${dragOver?'var(--green)':'var(--border2)'}`, borderRadius:14, padding:30, textAlign:'center', background: dragOver?'var(--green-light)':'var(--bg2)', position:'relative', marginBottom:20, cursor:'pointer', transition:'all 0.15s' }}>
+        <div style={{ fontSize:24, marginBottom:8 }}>🎙️</div>
+        <div style={{ fontSize:13, color:'var(--text2)', marginBottom:4 }}>Arrastra tus audios o videos aquí</div>
+        <div style={{ fontSize:12, color:'var(--text3)', marginBottom:12 }}>MP3, MP4, M4A, WAV, MOV, WEBM — puedes subir varios a la vez</div>
+        <input type="file" multiple accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.mov,.webm,.ogg" onChange={e=>addFiles(e.target.files)}
+          style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+        <div style={{ display:'inline-block', padding:'7px 20px', background:'var(--green)', color:'white', borderRadius:8, fontSize:12, fontWeight:500 }}>Seleccionar archivos</div>
+      </div>
+
+      {/* Queue */}
+      {queue.length > 0 && (
+        <div style={{ ...card, marginBottom:16 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:500 }}>Cola — {queue.length} archivo{queue.length!==1?'s':''}</div>
+            <button style={btnP} onClick={transcribeAll} disabled={processing}>
+              {processing ? '⏳ Transcribiendo...' : `▶ Transcribir todo (${queue.filter(x=>x.status==='pending'||x.status==='error').length})`}
             </button>
           </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            {queue.map(item => (
+              <div key={item.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 12px', background:'var(--bg2)', borderRadius:10, border:'0.5px solid var(--border)' }}>
+                <div style={{ fontSize:20 }}>{item.file?.type?.startsWith('video')?'🎬':'🎙️'}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:12, fontWeight:500 }}>{item.name}</div>
+                  <div style={{ fontSize:11, color:'var(--text3)' }}>{fmtSize(item.size)}</div>
+                  {item.status==='error'&&<div style={{ fontSize:11, color:'var(--danger)', marginTop:2 }}>{item.text}</div>}
+                </div>
+                <div style={{ fontSize:11, fontWeight:500, color:statusColor[item.status] }}>
+                  {item.status==='processing' ? (
+                    <span style={{ display:'inline-flex', alignItems:'center', gap:5 }}>
+                      <span style={{ display:'inline-block', width:10, height:10, borderRadius:'50%', border:'2px solid var(--amber)', borderTopColor:'transparent', animation:'spin 0.8s linear infinite' }}></span>
+                      Transcribiendo...
+                    </span>
+                  ) : statusLabel[item.status]}
+                </div>
+                {item.status!=='processing'&&<button style={btnD} onClick={()=>removeQueue(item.id)}>✕</button>}
+              </div>
+            ))}
+          </div>
         </div>
-        <div style={{ flex:1, overflowY:'auto', padding:20 }}>{renderPanel()}</div>
-      </div>
-      <Modal open={showModal} onClose={()=>setShowModal(false)} title="Nuevo proyecto">
-        {[['name','Nombre del proyecto'],['director','Director / responsable'],['duration','Duración (ej: 8 semanas)']].map(([k,ph])=>(
-          <div key={k} style={{ marginBottom:8 }}><input style={iStyle} value={newProj[k]} onChange={e=>setNewProj(p=>({...p,[k]:e.target.value}))} placeholder={ph} /></div>
-        ))}
-        <div style={{ display:'flex', gap:8, marginTop:12, justifyContent:'flex-end' }}>
-          <button style={btnS} onClick={()=>setShowModal(false)}>Cancelar</button>
-          <button style={btnP} onClick={createProject}>Crear</button>
+      )}
+
+      {/* Saved */}
+      {items.length > 0 && (
+        <div>
+          <div style={{ fontSize:13, fontWeight:500, marginBottom:12 }}>Transcripciones guardadas — {items.length}</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            {items.map(item => {
+              const displayText = mode==='timecodes' ? (item.textTC||item.text) : item.text
+              return (
+                <div key={item.id} style={card}>
+                  <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+                    <div style={{ fontSize:16 }}>📄</div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:500 }}>{item.name}</div>
+                      <div style={{ fontSize:11, color:'var(--text3)' }}>{item.date}{item.duration?` · ${fmtDur(item.duration)}`:''}</div>
+                    </div>
+                    <button style={btnS} onClick={()=>copyText(item)}>Copiar {mode==='timecodes'?'con TC':'texto'}</button>
+                    <button style={btnD} onClick={()=>removeItem(item.id)}>✕</button>
+                  </div>
+                  {mode==='timecodes' && item.textTC ? (
+                    <div style={{ background:'var(--bg2)', borderRadius:8, padding:'10px 12px', fontSize:12, color:'var(--text)', lineHeight:2, maxHeight:280, overflowY:'auto', fontFamily:"'DM Mono',monospace" }}>
+                      {item.textTC.split('\n').map((line,i) => {
+                        const match = line.match(/^(\[\d+:\d+(?::\d+)?\])(.*)/)
+                        return match ? (
+                          <div key={i} style={{ display:'flex', gap:10, padding:'2px 0', borderBottom:'0.5px solid var(--border)' }}>
+                            <span style={{ color:'var(--green-dark)', fontWeight:500, flexShrink:0, minWidth:60 }}>{match[1]}</span>
+                            <span style={{ color:'var(--text)' }}>{match[2]}</span>
+                          </div>
+                        ) : <div key={i}>{line}</div>
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ background:'var(--bg2)', borderRadius:8, padding:'10px 12px', fontSize:13, color:'var(--text)', lineHeight:1.7, maxHeight:200, overflowY:'auto', whiteSpace:'pre-wrap' }}>
+                      {displayText}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
-      </Modal>
+      )}
+
+      {items.length===0 && queue.length===0 && (
+        <div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>
+          Sube tus audios o videos para transcribirlos con Whisper AI
+        </div>
+      )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 }
+
+
