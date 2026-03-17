@@ -93,7 +93,8 @@ export function useSupabaseDoc(table, projectKey, init) {
         if (rows && rows.length > 0) {
           const row = rows[0]
           setRowId(row.id)
-          const parsed = row.lines || row.rows || row.panels || row.data || init
+          let parsed = row.lines || row.rows || row.panels || row.data || init
+          if (Array.isArray(init) && !Array.isArray(parsed)) parsed = init
           setDataLocal(parsed)
           localStorage.setItem(lsKey, JSON.stringify(parsed))
         }
