@@ -29,6 +29,8 @@ const TH = { background:'var(--bg3)', padding:'9px 12px', textAlign:'left', font
 const TD = { padding:'8px 10px', borderBottom:'0.5px solid var(--border)', color:'var(--text)', verticalAlign:'middle', fontSize:12 }
 const TDI = { border:'none', background:'transparent', color:'var(--text)', fontFamily:"'DM Sans',sans-serif", fontSize:12, width:'100%', outline:'none', padding:0 }
 const STATUS_COLORS = { done:'#1D9E75', active:'#185FA5', pending:'#854F0B', blocked:'#A32D2D', aprobado:'#1D9E75', revision:'#185FA5', pendiente:'#854F0B', rechazado:'#A32D2D' }
+const STATUS_BG = { aprobado:'#1D9E75', revision:'#185FA5', pendiente:'#c48a30', rechazado:'#A32D2D' }
+const STATUS_LABEL_COLORS = { aprobado:'white', revision:'white', pendiente:'white', rechazado:'white' }
 const fmt = n => '$' + Math.round(n).toLocaleString('es-MX')
 const ARTIST_COLORS = ['#1D9E75','#185FA5','#854F0B','#993556','#3B6D11','#533AB7']
 const ALL_ARTISTS = ['Enrique','Rubén','Cris','Tam','Laura','Carlos']
@@ -124,17 +126,28 @@ function ScriptPanel({ projectKey }) {
   const lsMetaKey = `script_meta_${projectKey}`
   const [meta, setMeta] = useLS(lsMetaKey, { titulo:'', autor:'', formato:'Cortometraje' })
   const [lines, setLines] = useSupabaseDoc('scripts', projectKey, [])
-  const typeStyles = {
-    scene:{ fontWeight:'bold', textTransform:'uppercase', marginTop:16, fontFamily:"'DM Mono',monospace" },
-    action:{ marginTop:4 },
-    character:{ textAlign:'center', fontWeight:'bold', marginTop:12 },
-    dialogue:{ margin:'0 80px' },
-    parenthetical:{ margin:'0 100px', fontStyle:'italic', color:'var(--text2)' }
-  }
-  const add = type => setLines([...(Array.isArray(lines)?lines:[]), {type,text:''}])
-  const update = (i,text) => setLines((Array.isArray(lines)?lines:[]).map((x,idx)=>idx===i?{...x,text}:x))
-  const remove = i => setLines((Array.isArray(lines)?lines:[]).filter((_,idx)=>idx!==i))
   const safeLines = Array.isArray(lines) ? lines : []
+  const typeStyles = {
+    scene:{ fontWeight:'bold', textTransform:'uppercase', marginTop:20, fontFamily:"'DM Mono',monospace" },
+    action:{ marginTop:8 },
+    character:{ textAlign:'center', fontWeight:'bold', marginTop:16 },
+    dialogue:{ paddingLeft:80, paddingRight:80 },
+    parenthetical:{ paddingLeft:100, paddingRight:100, fontStyle:'italic', color:'var(--text2)' }
+  }
+  const add = type => setLines([...safeLines, {type, text:''}])
+  const update = (i, text) => setLines(safeLines.map((x,idx)=>idx===i?{...x,text}:x))
+  const remove = i => setLines(safeLines.filter((_,idx)=>idx!==i))
+
+  // Auto-resize all textareas on mount/update
+  const containerRef = useRef()
+  useEffect(() => {
+    if (!containerRef.current) return
+    containerRef.current.querySelectorAll('textarea').forEach(ta => {
+      ta.style.height = 'auto'
+      ta.style.height = ta.scrollHeight + 'px'
+    })
+  }, [safeLines])
+
   return (
     <div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
@@ -148,18 +161,17 @@ function ScriptPanel({ projectKey }) {
           </select>
         </div>
       </div>
-      <div style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, padding:24, fontFamily:"'DM Mono',monospace", fontSize:13, lineHeight:2, minHeight:400 }}>
+      <div ref={containerRef} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, padding:'24px 32px', fontFamily:"'DM Mono',monospace", fontSize:13, lineHeight:2 }}>
         {safeLines.length === 0 && <div style={{ color:'var(--text3)', fontSize:12, textAlign:'center', padding:20 }}>Agrega elementos con los botones de abajo</div>}
         {safeLines.map((line,i)=>(
           <div key={i} style={{ display:'flex', gap:8, alignItems:'flex-start', ...typeStyles[line.type] }}>
-            <div style={{ flex:1 }}>
+            <div style={{ flex:1, ...typeStyles[line.type] }}>
               <textarea
                 value={line.text||''}
-                onChange={e=>update(i,e.target.value)}
-                placeholder={line.type==='scene'?'INT./EXT. LOCACIÓN - TIEMPO':line.type==='character'?'NOMBRE PERSONAJE':line.type==='dialogue'?'Línea de diálogo...':line.type==='parenthetical'?'(indicación)':'Descripción...'}
-                style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontFamily:'inherit', fontSize:'inherit', color:'var(--text)', outline:'none', lineHeight:'inherit', overflow:'hidden' }}
+                onChange={e=>{update(i,e.target.value); e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'}}
+                placeholder={line.type==='scene'?'INT./EXT. LOCACIÓN - TIEMPO':line.type==='character'?'NOMBRE PERSONAJE':line.type==='dialogue'?'Línea de diálogo...':line.type==='parenthetical'?'(indicación)':'Descripción de la acción...'}
+                style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontFamily:'inherit', fontSize:'inherit', color:'var(--text)', outline:'none', lineHeight:'inherit', minHeight:'1.5em', overflow:'hidden', display:'block' }}
                 rows={1}
-                onInput={e=>{ e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px' }}
               />
             </div>
             <button onClick={()=>remove(i)} style={{ ...btnD, marginTop:4, flexShrink:0 }}>✕</button>
@@ -177,12 +189,18 @@ function ScriptPanel({ projectKey }) {
 
 function BreakdownPanel({ projectKey }) {
   const [rows, setRows] = useSupabaseDoc('breakdowns', projectKey, [])
+  const safeRows = Array.isArray(rows) ? rows : []
   const [mode, setMode] = useState('arte')
   const [importing, setImporting] = useState(false)
+  const [selected, setSelected] = useState(new Set())
+  const [showConfirmClear, setShowConfirmClear] = useState(false)
   const artistColor = name => { const idx = ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
-  const update = (id,key,val) => setRows(rows.map(x=>x.id===id?{...x,[key]:val}:x))
-  const addRow = () => setRows([...rows,{ id:Date.now(), numEscena:'', secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:'', desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'' }])
-  const remove = id => setRows(rows.filter(x=>x.id!==id))
+  const update = (id,key,val) => setRows(safeRows.map(x=>x.id===id?{...x,[key]:val}:x))
+  const addRow = () => setRows([...safeRows,{ id:Date.now(), numEscena:'', secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:'', desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'' }])
+  const remove = id => setRows(safeRows.filter(x=>x.id!==id))
+  const toggleSelect = id => setSelected(s => { const n=new Set(s); n.has(id)?n.delete(id):n.add(id); return n })
+  const deleteSelected = () => { setRows(safeRows.filter(x=>!selected.has(x.id))); setSelected(new Set()) }
+  const clearAll = () => { setRows([]); setShowConfirmClear(false) }
 
   const handleImport = async (e) => {
     const file = e.target.files[0]
@@ -263,18 +281,27 @@ function BreakdownPanel({ projectKey }) {
         {[['arte','Modo Arte'],['animacion','Modo Animación']].map(([m,label])=>(
           <button key={m} style={{ padding:'6px 16px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:mode===m?'var(--green)':'transparent', color:mode===m?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setMode(m)}>{label}</button>
         ))}
-        <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+        <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+          {selected.size>0&&<button style={{ ...btnS, color:'var(--danger)', borderColor:'var(--danger)' }} onClick={deleteSelected}>🗑 Eliminar {selected.size} seleccionadas</button>}
+          <button style={{ ...btnS, color:'var(--danger)' }} onClick={()=>setShowConfirmClear(true)}>Borrar todo</button>
           <div style={{ position:'relative' }}>
             <button style={btnS}>{importing?'Importando...':'↑ Importar'}</button>
             <input type="file" accept=".csv,.xlsx,.xls,.pdf,image/*" onChange={handleImport} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={importing} />
           </div>
         </div>
       </div>
+      {showConfirmClear&&(
+        <div style={{ background:'var(--danger-light)', border:'0.5px solid var(--danger)', borderRadius:10, padding:'12px 16px', marginBottom:12, display:'flex', alignItems:'center', gap:12 }}>
+          <span style={{ fontSize:13, color:'var(--danger)', flex:1 }}>¿Seguro que quieres borrar TODAS las filas? Esta acción no se puede deshacer.</span>
+          <button style={{ ...btnS, color:'var(--danger)', borderColor:'var(--danger)' }} onClick={clearAll}>Sí, borrar todo</button>
+          <button style={btnS} onClick={()=>setShowConfirmClear(false)}>Cancelar</button>
+        </div>
+      )}
       <div style={{ overflowX:'auto', border:'0.5px solid var(--border)', borderRadius:14 }}>
         <table style={{ borderCollapse:'collapse', fontSize:12, background:'var(--bg)' }}>
-          <thead><tr>{cols.map(c=><th key={c.key} style={{ ...TH, width:c.w, minWidth:c.w }}>{c.label}</th>)}<th style={TH}></th></tr></thead>
+          <thead><tr><th style={{ ...TH, width:28 }}><input type='checkbox' onChange={e=>setSelected(e.target.checked?new Set(safeRows.map(r=>r.id)):new Set())} /></th>{cols.map(c=><th key={c.key} style={{ ...TH, width:c.w, minWidth:c.w }}>{c.label}</th>)}<th style={TH}></th></tr></thead>
           <tbody>
-            {rows.map(row=>{
+            {safeRows.map(row=>{
               const assignee = mode==='arte' ? row.artista : row.animador
               const color = assignee ? artistColor(assignee) : null
               const sColor = STATUS_COLORS[row.estatus]||'#888'
@@ -282,8 +309,8 @@ function BreakdownPanel({ projectKey }) {
                 <tr key={row.id} style={{ borderLeft: color?`3px solid ${color}55`:'3px solid transparent' }}>
                   {cols.map(c=>(
                     <td key={c.key} style={{ ...TD, width:c.w, minWidth:c.w }}>
-                      {c.key==='estatus' ? <select value={row[c.key]||'pendiente'} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, color:sColor, fontWeight:500, cursor:'pointer' }}>{['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}</select>
-                      : c.key==='artista'||c.key==='animador' ? <select value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, color:row[c.key]?artistColor(row[c.key]):'var(--text3)', fontWeight:500, cursor:'pointer' }}><option value="">—</option>{ALL_ARTISTS.map(a=><option key={a} value={a}>{a}</option>)}</select>
+                      {c.key==='estatus' ? <select value={row[c.key]||'pendiente'} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, background:STATUS_BG[row[c.key]]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>{['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}</select>
+                      : c.key==='artista'||c.key==='animador' ? <input value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, color:row[c.key]?artistColor(row[c.key]):'var(--text3)', fontWeight:500 }} placeholder="—" />
                       : c.key==='comentarios'||c.key==='desglosArte'||c.key==='desglosAnim'||c.key==='personajes' ? <textarea value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4 }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                       : <input value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={TDI} />}
                     </td>
@@ -368,7 +395,7 @@ function StoryboardPanel({ projectKey }) {
               <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <span>Panel {i+1}</span>
                 <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                  <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)} style={{ fontSize:10, border:'none', background:'transparent', color:STATUS_COLORS[p.estatus]||'#888', cursor:'pointer', outline:'none' }}>
+                  <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)} style={{ fontSize:10, border:'none', background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', cursor:'pointer', outline:'none', borderRadius:4, padding:'2px 4px', fontWeight:500 }}>
                     {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
                   </select>
                   <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>remove(p.id)}>✕</button>
@@ -389,10 +416,7 @@ function StoryboardPanel({ projectKey }) {
               </div>
               <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
                 <input value={p.duration||''} onChange={e=>update(p.id,'duration',e.target.value)} placeholder="Duración: 3s" style={{ ...TDI, fontSize:11, color:'var(--text3)', width:80 }} />
-                <select value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', cursor:'pointer', width:80 }}>
-                  <option value="">Artista</option>
-                  {ALL_ARTISTS.map(a=><option key={a} value={a}>{a}</option>)}
-                </select>
+                <input value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', width:80 }} placeholder="Artista" />
               </div>
             </div>
           ))}
@@ -423,10 +447,7 @@ function StoryboardPanel({ projectKey }) {
                     <textarea value={p.desc||''} onChange={e=>update(p.id,'desc',e.target.value)} rows={2} style={{ ...TDI, resize:'none', lineHeight:1.4 }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                   </td>
                   <td style={{ ...TD, width:90 }}>
-                    <select value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} style={{ ...TDI, color:p.artista?artistColor(p.artista):'var(--text3)', fontWeight:500, cursor:'pointer' }}>
-                      <option value="">—</option>
-                      {ALL_ARTISTS.map(a=><option key={a} value={a}>{a}</option>)}
-                    </select>
+                    <input value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} style={{ ...TDI, color:p.artista?artistColor(p.artista):'var(--text3)', fontWeight:500 }} placeholder="—" />
                   </td>
                   <td style={{ ...TD, width:180 }}>
                     <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} rows={2} style={{ ...TDI, resize:'none', lineHeight:1.4, fontStyle:'italic' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
@@ -438,7 +459,7 @@ function StoryboardPanel({ projectKey }) {
                     <input value={p.duration||''} onChange={e=>update(p.id,'duration',e.target.value)} style={{ ...TDI, width:60 }} placeholder="3s" />
                   </td>
                   <td style={{ ...TD, width:100 }}>
-                    <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)} style={{ ...TDI, color:STATUS_COLORS[p.estatus]||'#888', fontWeight:500, cursor:'pointer' }}>
+                    <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)} style={{ ...TDI, background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>
                       {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
@@ -802,17 +823,19 @@ function TrackingPanel({ projectKey }) {
   const { data: allTasks, insert: insertTaskDB, update: updateTask, remove: removeTaskDB } = useSupabaseTable('tracking', `tracking_${projectKey}`, [], 'created_at')
   const tasks = (Array.isArray(allTasks)?allTasks:[]).filter(r => !r.project_key || r.project_key === projectKey)
   const insertTask = row => insertTaskDB({...row, project_key: projectKey})
-  const removeTask = id => removeTaskDB(id)
 
-  // Tracking files in Supabase
-  const { data: allTFiles, insert: insertTFile, update: updateTFile, remove: removeTFile } = useSupabaseTable('tracking_files', `tfiles_${projectKey}`, [], 'created_at')
+  const { data: allTFiles, insert: insertTFile, remove: removeTFile } = useSupabaseTable('tracking_files', `tfiles_${projectKey}`, [], 'created_at')
   const taskFiles = (Array.isArray(allTFiles)?allTFiles:[]).filter(f => f.project_key === projectKey)
+
+  const { data: allComments, insert: insertComment, remove: removeComment } = useSupabaseTable('task_comments', `tcomments_${projectKey}`, [], 'created_at')
+  const taskComments = (Array.isArray(allComments)?allComments:[]).filter(c => c.project_key === projectKey)
 
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(null)
   const [newName, setNewName] = useState('')
   const [newAssignee, setNewAssignee] = useState('')
   const [uploading, setUploading] = useState(null)
+  const [newComment, setNewComment] = useState({})
 
   const toggle = id => { const task = tasks.find(x=>x.id===id); if(task) updateTask(id,{done:!task.done}) }
   const addTask = () => { if(!newName.trim()) return; insertTask({name:newName.trim(),project:'General',assignee:newAssignee||'Sin asignar',done:false,week:'hoy'}); setNewName(''); setNewAssignee('') }
@@ -822,21 +845,27 @@ function TrackingPanel({ projectKey }) {
     try {
       const uploaded = await uploadFile(file)
       if (uploaded) {
-        await insertTFile({ task_id:String(taskId), project_key:projectKey, name:file.name, file_type:file.type||'', size:file.size, url:uploaded.url, path:uploaded.path, comment:'', upload_date:new Date().toLocaleDateString('es-MX') })
+        await insertTFile({ task_id:String(taskId), project_key:projectKey, name:file.name, file_type:file.type||'', size:file.size, url:uploaded.url, path:uploaded.path, upload_date:new Date().toLocaleDateString('es-MX') })
       } else {
-        if (file.size > 5*1024*1024) { alert(`${file.name} es muy grande. Verifica tu conexión.`); return }
+        if (file.size > 5*1024*1024) { alert(`${file.name} es muy grande.`); return }
         const url = await new Promise((res,rej)=>{const r=new FileReader();r.onload=ev=>res(ev.target.result);r.onerror=rej;r.readAsDataURL(file)})
-        await insertTFile({ task_id:String(taskId), project_key:projectKey, name:file.name, file_type:file.type||'', size:file.size, url, path:'', comment:'', upload_date:new Date().toLocaleDateString('es-MX') })
+        await insertTFile({ task_id:String(taskId), project_key:projectKey, name:file.name, file_type:file.type||'', size:file.size, url, path:'', upload_date:new Date().toLocaleDateString('es-MX') })
       }
     } catch(err) { alert(`Error: ${err.message}`) }
     setUploading(null)
   }
 
-  const updateFileComment = (fileId, comment) => updateTFile(fileId, { comment })
   const removeFile = async (fileId) => {
     const f = taskFiles.find(x=>x.id===fileId)
     if (f?.path) await deleteFile(f.path)
     removeTFile(fileId)
+  }
+
+  const sendComment = (taskId, userName) => {
+    const text = (newComment[taskId]||'').trim()
+    if (!text) return
+    insertComment({ task_id:String(taskId), project_key:projectKey, user_name:userName, message:text })
+    setNewComment(c=>({...c,[taskId]:''}))
   }
 
   const visible = tasks.filter(t=>filter==='all'||(filter==='pending'&&!t.done)||(filter==='done'&&t.done))
@@ -851,26 +880,30 @@ function TrackingPanel({ projectKey }) {
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
         {visible.map(t=>{
           const tFiles = taskFiles.filter(f=>String(f.task_id)===String(t.id))
+          const tComments = taskComments.filter(c=>String(c.task_id)===String(t.id))
           return (
             <div key={t.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14 }}>
               <div style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 14px', cursor:'pointer' }} onClick={()=>setExpanded(expanded===t.id?null:t.id)}>
                 <div onClick={e=>{e.stopPropagation();toggle(t.id)}} style={{ width:18, height:18, borderRadius:4, border:t.done?'none':'1.5px solid var(--border2)', background:t.done?'var(--green)':'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, color:'white', fontSize:11 }}>{t.done&&'✓'}</div>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:13, textDecoration:t.done?'line-through':'none', color:t.done?'var(--text3)':'var(--text)' }}>{t.name}</div>
-                  <div style={{ fontSize:11, color:'var(--text3)' }}>{t.project} · {t.week}{tFiles.length>0?` · ${tFiles.length} archivo${tFiles.length>1?'s':''}`:''}</div>
+                  <div style={{ fontSize:11, color:'var(--text3)' }}>{t.project} · {t.week}{tFiles.length>0?` · ${tFiles.length} arch.`:''}{tComments.length>0?` · ${tComments.length} comentarios`:''}</div>
                 </div>
                 <div style={{ fontSize:11, padding:'2px 8px', borderRadius:20, background:'var(--bg3)', color:'var(--text2)' }}>{t.assignee}</div>
                 <div style={{ fontSize:11, color:'var(--text3)' }}>{expanded===t.id?'▲':'▼'}</div>
               </div>
+
               {expanded===t.id&&(
                 <div style={{ borderTop:'0.5px solid var(--border)', padding:'12px 14px' }}>
-                  <div style={{ fontSize:11, fontWeight:500, color:'var(--text2)', marginBottom:10 }}>Historial de entregables</div>
-                  {tFiles.length===0&&<div style={{ fontSize:12, color:'var(--text3)', marginBottom:10 }}>Sin archivos adjuntos aún.</div>}
-                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:10, marginBottom:12 }}>
+
+                  {/* Archivos adjuntos */}
+                  <div style={{ fontSize:11, fontWeight:500, color:'var(--text2)', marginBottom:8 }}>Archivos adjuntos</div>
+                  {tFiles.length===0&&<div style={{ fontSize:12, color:'var(--text3)', marginBottom:8 }}>Sin archivos aún.</div>}
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:8, marginBottom:12 }}>
                     {tFiles.map(f=>{
-                      const ext = f.name?.split('.').pop()?.toLowerCase()
-                      const isImg = f.file_type?.startsWith('image/')||['jpg','jpeg','png','gif','webp'].includes(ext)
-                      const isVid = f.file_type?.startsWith('video/')||['mp4','mov','avi','webm'].includes(ext)
+                      const ext=f.name?.split('.').pop()?.toLowerCase()
+                      const isImg=f.file_type?.startsWith('image/')||['jpg','jpeg','png','gif','webp'].includes(ext)
+                      const isVid=f.file_type?.startsWith('video/')||['mp4','mov','avi','webm'].includes(ext)
                       return (
                         <div key={f.id} style={{ background:'var(--bg2)', border:'0.5px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
                           <div style={{ aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
@@ -880,25 +913,36 @@ function TrackingPanel({ projectKey }) {
                           </div>
                           <div style={{ padding:'8px 10px' }}>
                             <div style={{ fontSize:11, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.name}</div>
-                            <div style={{ fontSize:10, color:'var(--text3)', marginBottom:4 }}>{f.upload_date} · {f.size?(f.size/1024/1024).toFixed(1)+'MB':''}</div>
-                            <textarea
-                              value={f.comment||''}
-                              onChange={e=>updateFileComment(f.id,e.target.value)}
-                              placeholder="Comentario visible para todos..."
-                              rows={1}
-                              style={{ ...iStyle, fontSize:11, padding:'4px 7px', resize:'none', overflow:'hidden', lineHeight:1.5 }}
-                              onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}}
-                            />
-                            {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:4 }}>Ver / Descargar ↗</a>}
+                            <div style={{ fontSize:10, color:'var(--text3)' }}>{f.upload_date} · {f.size?(f.size/1024/1024).toFixed(1)+'MB':''}</div>
+                            {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:3 }}>Ver / Descargar ↗</a>}
                             <button style={{ ...btnD, marginTop:4, fontSize:10 }} onClick={()=>removeFile(f.id)}>Eliminar</button>
                           </div>
                         </div>
                       )
                     })}
                   </div>
-                  <div style={{ position:'relative', display:'inline-block' }}>
+                  <div style={{ position:'relative', display:'inline-block', marginBottom:16 }}>
                     <button style={btnS} disabled={uploading===t.id}>{uploading===t.id?'Subiendo...':'+ Adjuntar archivo'}</button>
                     <input type="file" multiple accept="image/*,video/*,audio/*,.pdf,.zip,.jpg,.jpeg,.png,.mov,.mp4" onChange={e=>Array.from(e.target.files).forEach(f=>addFile(t.id,f))} style={{ position:'absolute', inset:0, opacity:0, cursor:uploading===t.id?'wait':'pointer' }} disabled={uploading===t.id} />
+                  </div>
+
+                  {/* Thread de comentarios */}
+                  <div style={{ borderTop:'0.5px solid var(--border)', paddingTop:12 }}>
+                    <div style={{ fontSize:11, fontWeight:500, color:'var(--text2)', marginBottom:10 }}>Comentarios del equipo</div>
+                    {tComments.length===0&&<div style={{ fontSize:12, color:'var(--text3)', marginBottom:10 }}>Sin comentarios aún.</div>}
+                    <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:12 }}>
+                      {tComments.map(c=>(
+                        <div key={c.id} style={{ background:'var(--bg2)', borderRadius:10, padding:'8px 12px', border:'0.5px solid var(--border)' }}>
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:4 }}>
+                            <span style={{ fontSize:11, fontWeight:500, color:'var(--green-dark)' }}>{c.user_name}</span>
+                            <span style={{ fontSize:10, color:'var(--text3)' }}>{new Date(c.created_at).toLocaleString('es-MX',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+                          </div>
+                          <div style={{ fontSize:13, color:'var(--text)', lineHeight:1.5, whiteSpace:'pre-wrap' }}>{c.message}</div>
+                          <button style={{ ...btnD, fontSize:10, marginTop:4 }} onClick={()=>removeComment(c.id)}>Eliminar</button>
+                        </div>
+                      ))}
+                    </div>
+                    <TrackingCommentBox taskId={t.id} value={newComment[t.id]||''} onChange={v=>setNewComment(c=>({...c,[t.id]:v}))} onSend={userName=>sendComment(t.id,userName)} />
                   </div>
                 </div>
               )}
@@ -911,6 +955,25 @@ function TrackingPanel({ projectKey }) {
         <input style={{ ...iStyle, width:140, marginBottom:0 }} value={newAssignee} onChange={e=>setNewAssignee(e.target.value)} placeholder="Responsable" />
         <button style={btnP} onClick={addTask}>Agregar</button>
       </div>
+    </div>
+  )
+}
+
+function TrackingCommentBox({ taskId, value, onChange, onSend }) {
+  const savedUser = localStorage.getItem('combo_user')
+  const user = savedUser ? JSON.parse(savedUser) : { name:'Usuario' }
+  return (
+    <div style={{ display:'flex', gap:8, alignItems:'flex-end', background:'var(--bg)', border:'0.5px solid var(--border2)', borderRadius:12, padding:'8px 10px' }}>
+      <textarea
+        value={value}
+        onChange={e=>onChange(e.target.value)}
+        onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();onSend(user.name)} }}
+        placeholder="Escribe un comentario... (Enter para enviar)"
+        rows={1}
+        style={{ flex:1, border:'none', background:'transparent', resize:'none', fontSize:13, color:'var(--text)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, overflow:'hidden' }}
+        onInput={e=>{e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px'}}
+      />
+      <button style={{ ...btnP, flexShrink:0, padding:'6px 12px' }} onClick={()=>onSend(user.name)}>Enviar</button>
     </div>
   )
 }
