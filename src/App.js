@@ -1673,7 +1673,7 @@ export default function App() {
     <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg2)' }}>
       <div style={{ width:220, minWidth:220, background:'var(--bg)', borderRight:'0.5px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden' }} className="no-print">
         <div style={{ padding:'16px 14px', borderBottom:'0.5px solid var(--border)' }}>
-          <img src="/logo.png" alt="ComboApp" style={{ height:32, maxWidth:160, objectFit:'contain' }} onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block'}} /><div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px', display:'none' }}>Combo<span style={{ color:'var(--green)' }}>App</span></div>
+          <img src="/logo.png" alt="ComboApp" style={{ height:44, maxWidth:180, objectFit:'contain' }} onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block'}} /><div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px', display:'none' }}>Combo<span style={{ color:'var(--green)' }}>App</span></div>
           <div style={{ marginTop:10 }}>
             <div style={{ fontSize:10, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:4 }}>Proyecto activo</div>
             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
