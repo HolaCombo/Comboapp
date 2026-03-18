@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { useSupabaseTable, useSupabaseDoc, useSupabaseFetch, uploadFile, deleteFile } from './useSupabase'
+import { useSupabaseTable, useSupabaseDoc, uploadFile, deleteFile } from './useSupabase'
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 function useTheme() {
@@ -378,22 +378,67 @@ function BreakdownPanel({ projectKey }) {
 }
 
 function StoryboardPanel({ projectKey }) {
-  const { panels, loading, addPanel, removePanel, updateLocal, saveField, saveImage, reload } = useStoryboard(projectKey)
+  // Use local state ONLY - sync to Supabase manually on blur/change
+  const { data: dbPanels, insert: insertPanel, update: updatePanelDB, remove: removePanelDB } = useSupabaseTable('storyboard_panels', `sb_${projectKey}`, [], 'panel_order')
+  const [panels, setPanels] = useState([])
   const [view, setView] = useState('cards')
   const [syncing, setSyncing] = useState(false)
+  const [initialized, setInitialized] = useState(false)
+
+  // Initialize local state from DB - always sync when DB changes
+  useEffect(() => {
+    const filtered = (Array.isArray(dbPanels)?dbPanels:[])
+      .filter(p=>p.project_key===projectKey)
+      .sort((a,b)=>(a.panel_order||0)-(b.panel_order||0))
+    if (!initialized && Array.isArray(dbPanels)) {
+      // First load - set from DB
+      setPanels(filtered.map(p=>({...p, img: p.img_url||'', desc: p.descripcion||''})))
+      setInitialized(true)
+    } else if (initialized && filtered.length > panels.length) {
+      // New panel added by another user - add it
+      const newOnes = filtered.filter(fp => !panels.find(p=>p.id===fp.id))
+      if (newOnes.length > 0) {
+        setPanels(prev => [...prev, ...newOnes.map(p=>({...p,img:p.img_url||'',desc:p.descripcion||''}))])
+      }
+    }
+  }, [dbPanels, projectKey, initialized])
+
+  const add = async () => {
+    const order = panels.length
+    const newPanel = await insertPanel({ project_key:projectKey, panel_order:order, img_url:'', img_path:'', descripcion:'', dialogo:'', comentarios:'', duracion:'', artista:'', estatus:'pendiente' })
+    if (newPanel) {
+      setPanels(prev => [...prev, {...newPanel, img:'', desc:''}])
+    }
+  }
+
+  const remove = id => {
+    setPanels(prev => prev.filter(x=>x.id!==id))
+    removePanelDB(id)
+  }
+
+  // Update local immediately, save to DB on blur
+  const updateLocal = (id, key, val) => {
+    setPanels(prev => prev.map(p=>p.id===id?{...p,[key]:val}:p))
+  }
+
+  const saveToDb = (id, key, val) => {
+    const dbKey = key==='img'?'img_url':key==='desc'?'descripcion':key
+    updatePanelDB(id, { [dbKey]: val })
+  }
 
   const loadImg = async (id, file) => {
-    // Show local preview immediately
+    // Show preview immediately
     const reader = new FileReader()
     reader.onload = async e => {
-      updateLocal(id, 'img', e.target.result)
-      // Upload to storage
-      const { uploadFile: uf } = await import('./useSupabase').catch(()=>({uploadFile:null}))
+      const localUrl = e.target.result
+      updateLocal(id, 'img', localUrl)
+      // Upload to Supabase in background
       const uploaded = await uploadFile(file)
       if (uploaded) {
-        saveImage(id, uploaded.url, uploaded.path)
+        updateLocal(id, 'img', uploaded.url)
+        updatePanelDB(id, { img_url: uploaded.url, img_path: uploaded.path })
       } else {
-        saveImage(id, e.target.result, '')
+        updatePanelDB(id, { img_url: localUrl, img_path: '' })
       }
     }
     reader.readAsDataURL(file)
@@ -419,8 +464,6 @@ function StoryboardPanel({ projectKey }) {
     setSyncing(false)
   }
 
-  if (loading) return <div style={{ padding:40, textAlign:'center', color:'var(--text3)', fontSize:13 }}>Cargando storyboard...</div>
-
   return (
     <div>
       <div style={{ display:'flex', gap:8, marginBottom:16, alignItems:'center', flexWrap:'wrap' }} className="no-print">
@@ -431,7 +474,6 @@ function StoryboardPanel({ projectKey }) {
           <button style={{ ...btnS, background:'var(--blue-light)', color:'var(--blue)', borderColor:'var(--blue)' }} onClick={syncToBreakdown} disabled={syncing}>
             {syncing?'Sincronizando...':'⇄ Sync al Breakdown'}
           </button>
-          <button style={btnS} onClick={reload} title="Recargar desde servidor">↺</button>
           <button style={btnS} onClick={()=>window.print()}>↓ PDF</button>
         </div>
       </div>
@@ -444,11 +486,11 @@ function StoryboardPanel({ projectKey }) {
                 <span>Panel {i+1}</span>
                 <div style={{ display:'flex', gap:6, alignItems:'center' }}>
                   <select value={p.estatus||'pendiente'}
-                    onChange={e=>{updateLocal(p.id,'estatus',e.target.value); saveField(p.id,'estatus',e.target.value)}}
+                    onChange={e=>{updateLocal(p.id,'estatus',e.target.value);saveToDb(p.id,'estatus',e.target.value)}}
                     style={{ fontSize:10, border:'none', background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', cursor:'pointer', outline:'none', borderRadius:4, padding:'2px 4px', fontWeight:500 }}>
                     {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
                   </select>
-                  <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>removePanel(p.id)}>✕</button>
+                  <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>remove(p.id)}>✕</button>
                 </div>
               </div>
               <div style={{ position:'relative', aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
@@ -459,37 +501,37 @@ function StoryboardPanel({ projectKey }) {
               <div style={{ padding:'8px 12px 4px' }}>
                 <textarea value={p.desc||''} placeholder="Descripción / Acción..."
                   onChange={e=>updateLocal(p.id,'desc',e.target.value)}
-                  onBlur={e=>saveField(p.id,'desc',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'desc',e.target.value)}
                   rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, overflow:'hidden' }}
                   onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
               </div>
               <div style={{ padding:'0 12px 4px' }}>
                 <textarea value={p.dialogo||''} placeholder="Diálogo / Guión..."
                   onChange={e=>updateLocal(p.id,'dialogo',e.target.value)}
-                  onBlur={e=>saveField(p.id,'dialogo',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'dialogo',e.target.value)}
                   rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic', overflow:'hidden' }}
                   onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
               </div>
               <div style={{ padding:'0 12px 4px' }}>
                 <textarea value={p.comentarios||''} placeholder="Comentarios..."
                   onChange={e=>updateLocal(p.id,'comentarios',e.target.value)}
-                  onBlur={e=>saveField(p.id,'comentarios',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'comentarios',e.target.value)}
                   rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px', overflow:'hidden' }}
                   onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
               </div>
               <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
                 <input value={p.duracion||''} placeholder="Dur: 3s"
                   onChange={e=>updateLocal(p.id,'duracion',e.target.value)}
-                  onBlur={e=>saveField(p.id,'duracion',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'duracion',e.target.value)}
                   style={{ ...TDI, fontSize:11, color:'var(--text3)', width:70 }} />
                 <input value={p.artista||''} placeholder="Artista"
                   onChange={e=>updateLocal(p.id,'artista',e.target.value)}
-                  onBlur={e=>saveField(p.id,'artista',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'artista',e.target.value)}
                   style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', flex:1 }} />
               </div>
             </div>
           ))}
-          <button onClick={addPanel} className="no-print" style={{ border:'1.5px dashed var(--border2)', background:'transparent', borderRadius:14, aspectRatio:'16/9', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'var(--text3)', fontSize:12 }}>+ Nuevo panel</button>
+          <button onClick={add} className="no-print" style={{ border:'1.5px dashed var(--border2)', background:'transparent', borderRadius:14, aspectRatio:'16/9', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'var(--text3)', fontSize:12 }}>+ Nuevo panel</button>
         </div>
       ) : (
         <div style={{ overflowX:'auto', border:'0.5px solid var(--border)', borderRadius:14 }}>
@@ -508,22 +550,22 @@ function StoryboardPanel({ projectKey }) {
                     </div>
                   </td>
                   <td style={{ ...TD, width:200 }}>
-                    <textarea value={p.desc||''} onChange={e=>updateLocal(p.id,'desc',e.target.value)} onBlur={e=>saveField(p.id,'desc',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                    <textarea value={p.desc||''} onChange={e=>updateLocal(p.id,'desc',e.target.value)} onBlur={e=>saveToDb(p.id,'desc',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                   </td>
                   <td style={{ ...TD, width:90 }}>
-                    <input value={p.artista||''} onChange={e=>updateLocal(p.id,'artista',e.target.value)} onBlur={e=>saveField(p.id,'artista',e.target.value)} style={{ ...TDI }} placeholder="—" />
+                    <input value={p.artista||''} onChange={e=>updateLocal(p.id,'artista',e.target.value)} onBlur={e=>saveToDb(p.id,'artista',e.target.value)} style={{ ...TDI, color:p.artista?artistColor(p.artista):'var(--text3)' }} placeholder="—" />
                   </td>
                   <td style={{ ...TD, width:180 }}>
-                    <textarea value={p.dialogo||''} onChange={e=>updateLocal(p.id,'dialogo',e.target.value)} onBlur={e=>saveField(p.id,'dialogo',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, fontStyle:'italic', overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                    <textarea value={p.dialogo||''} onChange={e=>updateLocal(p.id,'dialogo',e.target.value)} onBlur={e=>saveToDb(p.id,'dialogo',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, fontStyle:'italic', overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                   </td>
                   <td style={{ ...TD, width:160 }}>
-                    <textarea value={p.comentarios||''} onChange={e=>updateLocal(p.id,'comentarios',e.target.value)} onBlur={e=>saveField(p.id,'comentarios',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, color:'var(--green-dark)', overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                    <textarea value={p.comentarios||''} onChange={e=>updateLocal(p.id,'comentarios',e.target.value)} onBlur={e=>saveToDb(p.id,'comentarios',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, color:'var(--green-dark)', overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                   </td>
                   <td style={{ ...TD, width:70 }}>
-                    <input value={p.duracion||''} onChange={e=>updateLocal(p.id,'duracion',e.target.value)} onBlur={e=>saveField(p.id,'duracion',e.target.value)} style={{ ...TDI, width:60 }} placeholder="3s" />
+                    <input value={p.duracion||''} onChange={e=>updateLocal(p.id,'duracion',e.target.value)} onBlur={e=>saveToDb(p.id,'duracion',e.target.value)} style={{ ...TDI, width:60 }} placeholder="3s" />
                   </td>
                   <td style={{ ...TD, width:100 }}>
-                    <select value={p.estatus||'pendiente'} onChange={e=>{updateLocal(p.id,'estatus',e.target.value);saveField(p.id,'estatus',e.target.value)}} style={{ ...TDI, background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>
+                    <select value={p.estatus||'pendiente'} onChange={e=>{updateLocal(p.id,'estatus',e.target.value);saveToDb(p.id,'estatus',e.target.value)}} style={{ ...TDI, background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>
                       {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
@@ -531,9 +573,9 @@ function StoryboardPanel({ projectKey }) {
               ))}
             </tbody>
           </table>
-          <button style={{ ...btnS, margin:12 }} onClick={addPanel}>+ Agregar panel</button>
         </div>
       )}
+      {view==='table'&&<button style={{ ...btnS, marginTop:12 }} onClick={add}>+ Agregar panel</button>}
     </div>
   )
 }
@@ -1140,11 +1182,11 @@ function MiSemanaPanel({ user }) {
   const activeCorte = cortes.find(c=>c.id===currentCorte) || cortes[0]
 
   return (
-    <div style={{ display:'flex', gap:16, minHeight:500 }}>
+    <div style={{ display:'flex', gap:16, minHeight:400, alignItems:'flex-start' }}>
       {/* Sidebar de cortes */}
       <div style={{ width:200, minWidth:200, display:'flex', flexDirection:'column', gap:8 }}>
         <button style={{ ...btnP, width:'100%' }} onClick={newCorte}>+ Nuevo corte</button>
-        <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:6 }}>
+        <div style={{ flex:1, display:'flex', flexDirection:'column', gap:6 }}>
           {cortes.map(c=>(
             <div key={c.id} onClick={()=>setCurrentCorte(c.id)}
               style={{ background: currentCorte===c.id||(!currentCorte&&cortes[0]?.id===c.id)?'var(--green-light)':'var(--bg)', border:`0.5px solid ${currentCorte===c.id?'var(--green)':'var(--border)'}`, borderRadius:10, padding:'10px 12px', cursor:'pointer' }}>
