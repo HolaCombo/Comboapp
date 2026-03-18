@@ -1154,6 +1154,12 @@ function FilesPanel({ projectKey }) {
   )
 }
 
+const SEMAFORO = [
+  { value:'rojo', label:'🔴 Urgente', color:'#E24B4A' },
+  { value:'amarillo', label:'🟡 En proceso', color:'#EF9F27' },
+  { value:'verde', label:'🟢 Listo', color:'#1D9E75' },
+]
+
 function MiSemanaPanel({ user }) {
   const [cortes, setCortes] = useLS(`misemana_${user.id}`, [])
   const [showNew, setShowNew] = useState(false)
