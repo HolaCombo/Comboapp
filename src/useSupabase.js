@@ -65,10 +65,28 @@ export async function uploadFile(file, bucket = 'archivos') {
   if (!supabase) return null
   const ext = file.name.split('.').pop()
   const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-  const { error } = await supabase.storage.from(bucket).upload(path, file)
-  if (error) return null
+  // Detect content type - important for MOV, MP4 etc
+  const contentType = file.type || getMimeType(ext)
+  const { error } = await supabase.storage.from(bucket).upload(path, file, {
+    contentType,
+    cacheControl: '3600',
+    upsert: false
+  })
+  if (error) { console.error('Upload error:', error); return null }
   const { data } = supabase.storage.from(bucket).getPublicUrl(path)
   return { path, url: data.publicUrl }
+}
+
+function getMimeType(ext) {
+  const types = {
+    jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif',
+    webp:'image/webp', svg:'image/svg+xml', bmp:'image/bmp',
+    mp4:'video/mp4', mov:'video/quicktime', avi:'video/x-msvideo',
+    webm:'video/webm', mkv:'video/x-matroska',
+    mp3:'audio/mpeg', wav:'audio/wav', m4a:'audio/mp4', ogg:'audio/ogg',
+    pdf:'application/pdf'
+  }
+  return types[ext?.toLowerCase()] || 'application/octet-stream'
 }
 
 export async function deleteFile(path, bucket = 'archivos') {
