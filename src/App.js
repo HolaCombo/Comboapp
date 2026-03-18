@@ -194,6 +194,7 @@ function BreakdownPanel({ projectKey }) {
   const [importing, setImporting] = useState(false)
   const [selected, setSelected] = useState(new Set())
   const [showConfirmClear, setShowConfirmClear] = useState(false)
+  const [externalLink, setExternalLink] = useLS(`breakdown_link_${projectKey}`, '')
   const artistColor = name => { const idx = ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
   const update = (id,key,val) => setRows(safeRows.map(x=>x.id===id?{...x,[key]:val}:x))
   const addRow = () => setRows([...safeRows,{ id:Date.now(), numEscena:'', secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:'', desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'' }])
@@ -236,8 +237,33 @@ function BreakdownPanel({ projectKey }) {
             const ws = wb.Sheets[wb.SheetNames[0]]
             const data = window.XLSX.utils.sheet_to_json(ws, { defval:'' })
             const newRows = data.map((obj,i) => {
-              const k = key => obj[key]||obj[key.toLowerCase()]||obj[key.toUpperCase()]||''
-              return { id:Date.now()+i, numEscena:String(k('escena')||k('#')||k('num')||i+1), secuencia:k('secuencia')||k('seq')||'', inF:parseInt(k('in'))||0, outF:parseInt(k('out'))||0, frames:parseInt(k('frames')||k('cuadros'))||0, fps:parseInt(k('fps'))||8, timecode:k('timecode')||k('h:m:s:f')||'', personajes:k('personajes')||k('characters')||'', desglosArte:k('desglose arte')||k('arte')||k('opening')||k('field 2')||'', desglosAnim:k('desglose animacion')||k('animacion')||k('storyline')||'', artista:k('artista')||k('artist')||k('field 3')||'', animador:k('animador')||'', dias:parseInt(k('dias')||k('tiempo'))||0, estatus:k('estatus')||k('status')||'pendiente', comentarios:k('comentarios')||k('comments')||'' }
+              // Try multiple possible column names (case insensitive)
+              const keys = Object.keys(obj)
+              const find = (...names) => {
+                for (const n of names) {
+                  const found = keys.find(k=>k.toLowerCase().includes(n.toLowerCase()))
+                  if (found && obj[found]!==undefined && obj[found]!=='') return String(obj[found])
+                }
+                return ''
+              }
+              return {
+                id:Date.now()+i,
+                numEscena: find('escena','#','num','scene') || String(i+1),
+                secuencia: find('secuencia','seq','sequence'),
+                inF: parseInt(find('in','inicio')) || 0,
+                outF: parseInt(find('out','fin')) || 0,
+                frames: parseInt(find('frame','cuadro','rough')) || 0,
+                fps: parseInt(find('fps')) || 8,
+                timecode: find('timecode','tiempo','h:m'),
+                personajes: find('personaje','character','cast','elenco'),
+                desglosArte: find('arte','art','opening','desglose arte','field 2','imagen referencia'),
+                desglosAnim: find('anim','storyline','accion','breakdown','field'),
+                artista: find('artista','artist','andrea','martin','yisus'),
+                animador: find('animador','animator'),
+                dias: parseInt(find('dia','day','tiempo')) || 0,
+                estatus: find('estatus','status','estado') || 'pendiente',
+                comentarios: find('comentario','comment','nota','note','dialogo','dialogue')
+              }
             })
             setRows([...(Array.isArray(rows)?rows:[]), ...newRows])
           } catch(err) { alert('Error al leer el XLSX: '+err.message) }
@@ -271,8 +297,8 @@ function BreakdownPanel({ projectKey }) {
     }
   }
 
-  const arteColumns = [{ key:'numEscena', label:'Esc.', w:40 },{ key:'secuencia', label:'Secuencia', w:80 },{ key:'inF', label:'In', w:50 },{ key:'outF', label:'Out', w:50 },{ key:'frames', label:'Frames', w:60 },{ key:'timecode', label:'Timecode', w:100 },{ key:'personajes', label:'Personajes', w:130 },{ key:'desglosArte', label:'Desglose Arte', w:180 },{ key:'artista', label:'Artista', w:90 },{ key:'dias', label:'Días', w:50 },{ key:'estatus', label:'Estatus', w:100 },{ key:'comentarios', label:'Comentarios', w:180 }]
-  const animColumns = [{ key:'numEscena', label:'Esc.', w:40 },{ key:'secuencia', label:'Secuencia', w:80 },{ key:'inF', label:'In', w:50 },{ key:'outF', label:'Out', w:50 },{ key:'frames', label:'Frames', w:60 },{ key:'fps', label:'FPS', w:45 },{ key:'timecode', label:'H:M:S:F', w:100 },{ key:'personajes', label:'Personajes', w:130 },{ key:'desglosAnim', label:'Desglose Animación', w:180 },{ key:'layout', label:'Layout', w:55 },{ key:'rough', label:'Rough', w:55 },{ key:'clean', label:'Clean', w:55 },{ key:'color', label:'Color', w:55 },{ key:'composite', label:'Comp.', w:55 },{ key:'animador', label:'Animador', w:90 },{ key:'dias', label:'Días', w:50 },{ key:'estatus', label:'Estatus', w:100 },{ key:'comentarios', label:'Comentarios', w:180 }]
+  const arteColumns = [{ key:'numEscena', label:'Esc.', w:40 },{ key:'imagen', label:'Img', w:70 },{ key:'secuencia', label:'Secuencia', w:80 },{ key:'inF', label:'In', w:50 },{ key:'outF', label:'Out', w:50 },{ key:'frames', label:'Frames', w:60 },{ key:'timecode', label:'Timecode', w:100 },{ key:'personajes', label:'Personajes', w:130 },{ key:'desglosArte', label:'Desglose Arte', w:180 },{ key:'artista', label:'Artista', w:90 },{ key:'dias', label:'Días', w:50 },{ key:'estatus', label:'Estatus', w:140 },{ key:'comentarios', label:'Comentarios', w:200 }]
+  const animColumns = [{ key:'numEscena', label:'Esc.', w:40 },{ key:'imagen', label:'Img', w:70 },{ key:'secuencia', label:'Secuencia', w:80 },{ key:'inF', label:'In', w:50 },{ key:'outF', label:'Out', w:50 },{ key:'frames', label:'Frames', w:60 },{ key:'fps', label:'FPS', w:45 },{ key:'timecode', label:'H:M:S:F', w:100 },{ key:'personajes', label:'Personajes', w:130 },{ key:'desglosAnim', label:'Desglose Animación', w:180 },{ key:'layout', label:'Layout', w:55 },{ key:'rough', label:'Rough', w:55 },{ key:'clean', label:'Clean', w:55 },{ key:'color', label:'Color', w:55 },{ key:'composite', label:'Comp.', w:55 },{ key:'animador', label:'Animador', w:90 },{ key:'dias', label:'Días', w:50 },{ key:'estatus', label:'Estatus', w:140 },{ key:'comentarios', label:'Comentarios', w:200 }]
   const cols = mode==='arte' ? arteColumns : animColumns
 
   return (
@@ -306,13 +332,26 @@ function BreakdownPanel({ projectKey }) {
               const color = assignee ? artistColor(assignee) : null
               const sColor = STATUS_COLORS[row.estatus]||'#888'
               return (
-                <tr key={row.id} style={{ borderLeft: color?`3px solid ${color}55`:'3px solid transparent' }}>
+                <tr key={row.id} style={{ borderLeft: color?`3px solid ${color}55`:'3px solid transparent', background: selected.has(row.id)?'var(--danger-light)':'transparent' }}>
+                  <td style={{ ...TD, width:28, textAlign:'center' }}><input type='checkbox' checked={selected.has(row.id)} onChange={()=>toggleSelect(row.id)} /></td>
                   {cols.map(c=>(
-                    <td key={c.key} style={{ ...TD, width:c.w, minWidth:c.w }}>
-                      {c.key==='estatus' ? <select value={row[c.key]||'pendiente'} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, background:STATUS_BG[row[c.key]]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>{['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}</select>
-                      : c.key==='artista'||c.key==='animador' ? <input value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, color:row[c.key]?artistColor(row[c.key]):'var(--text3)', fontWeight:500 }} placeholder="—" />
-                      : c.key==='comentarios'||c.key==='desglosArte'||c.key==='desglosAnim'||c.key==='personajes' ? <textarea value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4 }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                      : <input value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={TDI} />}
+                    <td key={c.key} style={{ ...TD, width:c.w, minWidth:c.w, verticalAlign:'top', paddingTop:8 }}>
+                      {c.key==='imagen' ? (
+                        <div style={{ position:'relative', width:60, height:40, background:'var(--bg3)', borderRadius:4, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
+                          {row.imagen ? <img src={row.imagen} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <span style={{ fontSize:10, color:'var(--text3)' }}>+img</span>}
+                          <input type="file" accept="image/*" onChange={e=>{if(e.target.files[0]){const r=new FileReader();r.onload=ev=>update(row.id,'imagen',ev.target.result);r.readAsDataURL(e.target.files[0])}}} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+                        </div>
+                      ) : c.key==='estatus' ? (
+                        <select value={row[c.key]||'pendiente'} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, background:STATUS_BG[row[c.key]]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>
+                          {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
+                        </select>
+                      ) : c.key==='artista'||c.key==='animador' ? (
+                        <input value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={{ ...TDI, color:row[c.key]?artistColor(row[c.key]):'var(--text3)', fontWeight:500 }} placeholder="—" />
+                      ) : c.key==='comentarios'||c.key==='desglosArte'||c.key==='desglosAnim'||c.key==='personajes' ? (
+                        <textarea value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.5, overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                      ) : (
+                        <input value={row[c.key]||''} onChange={e=>update(row.id,c.key,e.target.value)} style={TDI} />
+                      )}
                     </td>
                   ))}
                   <td style={TD}><button style={btnD} onClick={()=>remove(row.id)}>✕</button></td>
@@ -322,7 +361,18 @@ function BreakdownPanel({ projectKey }) {
           </tbody>
         </table>
       </div>
-      <button style={{ ...btnS, marginTop:12 }} onClick={addRow}>+ Agregar escena</button>
+      <div style={{ display:'flex', gap:8, marginTop:12, flexWrap:'wrap', alignItems:'center' }}>
+        <button style={btnS} onClick={addRow}>+ Agregar escena</button>
+        <div style={{ height:20, width:1, background:'var(--border2)' }}></div>
+        <span style={{ fontSize:11, color:'var(--text3)' }}>¿Tienes un breakdown externo?</span>
+        <input
+          style={{ ...iStyle, width:320, marginBottom:0, fontSize:11 }}
+          placeholder="Pega liga de Google Sheets, Google Docs o Drive..."
+          value={externalLink||''}
+          onChange={e=>setExternalLink(e.target.value)}
+        />
+        {externalLink&&<a href={externalLink} target="_blank" rel="noreferrer" style={{ ...btnS, textDecoration:'none', fontSize:11 }}>Abrir ↗</a>}
+      </div>
     </div>
   )
 }
@@ -1076,7 +1126,7 @@ function MiSemanaPanel({ user }) {
   const activeCorte = cortes.find(c=>c.id===currentCorte) || cortes[0]
 
   return (
-    <div style={{ display:'flex', gap:16, height:'calc(100vh - 132px)' }}>
+    <div style={{ display:'flex', gap:16, minHeight:500 }}>
       {/* Sidebar de cortes */}
       <div style={{ width:200, minWidth:200, display:'flex', flexDirection:'column', gap:8 }}>
         <button style={{ ...btnP, width:'100%' }} onClick={newCorte}>+ Nuevo corte</button>
