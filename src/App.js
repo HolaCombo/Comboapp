@@ -379,13 +379,13 @@ function StoryboardPanel({ projectKey }) {
                 <input type="file" accept="image/*" className="no-print" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
               </div>
               <div style={{ padding:'8px 12px 4px' }}>
-                <textarea value={p.desc||''} onChange={e=>update(p.id,'desc',e.target.value)} placeholder="Descripción / Acción..." rows={2} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5 }} />
+                <textarea value={p.desc||''} onChange={e=>update(p.id,'desc',e.target.value)} placeholder="Descripción / Acción..." rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5 }} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
               </div>
               <div style={{ padding:'0 12px 4px' }}>
-                <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} placeholder="Diálogo / Guión..." rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic' }} />
+                <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} placeholder="Diálogo / Guión..." rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic' }} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
               </div>
               <div style={{ padding:'0 12px 4px' }}>
-                <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} placeholder="Comentarios..." rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px' }} />
+                <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} placeholder="Comentarios..." rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px' }} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
               </div>
               <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
                 <input value={p.duration||''} onChange={e=>update(p.id,'duration',e.target.value)} placeholder="Duración: 3s" style={{ ...TDI, fontSize:11, color:'var(--text3)', width:80 }} />
@@ -884,7 +884,7 @@ function TrackingPanel({ projectKey }) {
                         <div style={{ padding:'8px 10px' }}>
                           <div style={{ fontSize:11, fontWeight:500, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.name}</div>
                           <div style={{ fontSize:10, color:'var(--text3)', marginBottom:4 }}>{f.date} · {f.size?(f.size/1024).toFixed(0)+'KB':''}</div>
-                          <input style={{ ...iStyle, fontSize:11, padding:'4px 7px' }} value={f.comment||''} onChange={e=>updateFileComment(t.id,f.id,e.target.value)} placeholder="Comentario..." />
+                          <textarea style={{ ...iStyle, fontSize:11, padding:'4px 7px', resize:'none', overflow:'hidden', lineHeight:1.5 }} value={f.comment||''} onChange={e=>updateFileComment(t.id,f.id,e.target.value)} placeholder="Comentario..." rows={1} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
                           {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:2 }}>Ver archivo ↗</a>}
                           <button style={{ ...btnD, marginTop:4, fontSize:10 }} onClick={()=>removeFile(t.id,f.id)}>Eliminar</button>
                         </div>
@@ -911,9 +911,9 @@ function TrackingPanel({ projectKey }) {
 }
 
 function FilesPanel({ projectKey }) {
-  const lsKeyF = `project_files_${projectKey}`
-  const [files, setFiles] = useLS(lsKeyF, [])
-  const [uploadStatus, setUploadStatus] = useState('') // '' | 'uploading' | filename
+  const { data: allFiles, insert: insertFile, update: updateFileDB, remove: removeFileDB } = useSupabaseTable('project_files', `project_files_${projectKey}`, [], 'created_at')
+  const files = (Array.isArray(allFiles)?allFiles:[]).filter(f => f.project_key === projectKey)
+  const [uploadStatus, setUploadStatus] = useState('')
 
   const handleUpload = async e => {
     const fileList = Array.from(e.target.files)
@@ -921,85 +921,64 @@ function FilesPanel({ projectKey }) {
     for (const file of fileList) {
       setUploadStatus(`Subiendo: ${file.name}`)
       try {
-        // Try Supabase first
         const uploaded = await uploadFile(file)
         if (uploaded) {
-          const record = { id:Date.now()+Math.random(), name:file.name, type:file.type||`image/${file.name.split('.').pop()}`, size:file.size, url:uploaded.url, path:uploaded.path, comment:'', date:new Date().toLocaleDateString('es-MX') }
-          setFiles(f => { const n=[...f,record]; localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+          await insertFile({ project_key:projectKey, name:file.name, file_type:file.type||`image/${file.name.split('.').pop()}`, size:file.size, url:uploaded.url, path:uploaded.path, comment:'', upload_date:new Date().toLocaleDateString('es-MX') })
         } else {
-          // Supabase upload failed - show error for large files, fallback for small
-          if (file.size > 5*1024*1024) {
-            alert(`No se pudo subir ${file.name}. Verifica tu conexión e inténtalo de nuevo.`)
-            continue
-          }
-          const url = await new Promise((res,rej) => {
-            const r = new FileReader()
-            r.onload = ev => res(ev.target.result)
-            r.onerror = rej
-            r.readAsDataURL(file)
-          })
-          const record = { id:Date.now()+Math.random(), name:file.name, type:file.type||`image/${file.name.split('.').pop()}`, size:file.size, url, comment:'', date:new Date().toLocaleDateString('es-MX') }
-          setFiles(f => { const n=[...f,record]; localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+          if (file.size > 5*1024*1024) { alert(`No se pudo subir ${file.name}. Verifica tu conexión.`); continue }
+          const url = await new Promise((res,rej) => { const r=new FileReader(); r.onload=ev=>res(ev.target.result); r.onerror=rej; r.readAsDataURL(file) })
+          await insertFile({ project_key:projectKey, name:file.name, file_type:file.type||'', size:file.size, url, path:'', comment:'', upload_date:new Date().toLocaleDateString('es-MX') })
         }
-      } catch(err) {
-        alert(`Error al subir ${file.name}: ${err.message}`)
-      }
+      } catch(err) { alert(`Error al subir ${file.name}: ${err.message}`) }
     }
     setUploadStatus('')
   }
-  const updateComment = (id,comment) => setFiles(f=>{ const n=f.map(x=>x.id===id?{...x,comment}:x); localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+
+  const updateComment = (id, comment) => updateFileDB(id, { comment })
   const remove = async id => {
     const file = files.find(x=>x.id===id)
     if (file?.path) await deleteFile(file.path)
-    setFiles(f=>{ const n=f.filter(x=>x.id!==id); localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+    removeFileDB(id)
   }
+
   return (
     <div>
-      <div style={{ border:`1.5px dashed ${uploadStatus?'var(--green)':'var(--border2)'}`, borderRadius:14, padding:30, textAlign:'center', background: uploadStatus?'var(--green-light)':'var(--bg2)', position:'relative', marginBottom:20, cursor: uploadStatus?'wait':'pointer', transition:'all 0.2s' }}>
-        <div style={{ fontSize:22, marginBottom:8 }}>🖼️</div>
-        <div style={{ fontSize:13, color:'var(--text2)', marginBottom:4 }}>
-          {uploadStatus ? uploadStatus : 'Arrastra archivos aquí o haz clic'}
-        </div>
-        <div style={{ fontSize:12, color:'var(--text3)' }}>
-          {uploadStatus ? '...' : 'Imágenes, video, audio · JPG, PNG, MP4, MP3, etc.'}
-        </div>
+      <div onDragOver={e=>{e.preventDefault()}} onDrop={e=>{e.preventDefault();handleUpload({target:{files:e.dataTransfer.files,value:''}})}}
+        style={{ border:`1.5px dashed ${uploadStatus?'var(--green)':'var(--border2)'}`, borderRadius:14, padding:30, textAlign:'center', background:uploadStatus?'var(--green-light)':'var(--bg2)', position:'relative', marginBottom:20, cursor:uploadStatus?'wait':'pointer', transition:'all 0.2s' }}>
+        <div style={{ fontSize:22, marginBottom:8 }}>📁</div>
+        <div style={{ fontSize:13, color:'var(--text2)', marginBottom:4 }}>{uploadStatus||'Arrastra archivos aquí o haz clic'}</div>
+        <div style={{ fontSize:12, color:'var(--text3)' }}>{uploadStatus?'...':'Imágenes, video, audio · JPG, PNG, MOV, MP4, MP3, etc.'}</div>
         <input type="file" multiple accept="image/*,video/*,audio/*,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.mp3,.wav,.m4a" onChange={handleUpload} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={!!uploadStatus} />
       </div>
-      {files.length===0&&<div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>Sin archivos aún</div>}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))', gap:12 }}>
+      {files.length===0&&!uploadStatus&&<div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>Sin archivos aún</div>}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12 }}>
         {files.map(f=>{
           const ext = f.name?.split('.').pop()?.toLowerCase()
           const imgExts = ['jpg','jpeg','png','gif','webp','bmp','svg']
           const vidExts = ['mp4','mov','avi','webm','mkv']
-          const isImg = f.type?.startsWith('image/') || imgExts.includes(ext)
-          const isVid = f.type?.startsWith('video/') || vidExts.includes(ext)
-          return <div key={f.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
-            <div style={{ aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-              {isImg&&<img src={f.url} alt={f.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} />}
-              {isVid&&<video src={f.url} style={{ width:'100%', height:'100%', objectFit:'cover' }} muted />}
-              {!isImg&&!isVid&&<div style={{ fontSize:28 }}>🎵</div>}
+          const isImg = f.file_type?.startsWith('image/') || imgExts.includes(ext)
+          const isVid = f.file_type?.startsWith('video/') || vidExts.includes(ext)
+          return (
+            <div key={f.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
+              <div style={{ aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                {isImg&&<img src={f.url} alt={f.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} />}
+                {isVid&&<video src={f.url} style={{ width:'100%', height:'100%', objectFit:'cover' }} muted controls />}
+                {!isImg&&!isVid&&<div style={{ fontSize:28 }}>🎵</div>}
+              </div>
+              <div style={{ padding:'8px 10px' }}>
+                <div style={{ fontSize:11, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.name}</div>
+                <div style={{ fontSize:10, color:'var(--text3)', marginTop:1 }}>{f.upload_date} · {f.size?(f.size/1024/1024).toFixed(1)+'MB':''}</div>
+                <textarea style={{ ...iStyle, marginTop:6, fontSize:11, padding:'4px 7px', resize:'none', overflow:'hidden', lineHeight:1.5 }} value={f.comment||''} onChange={e=>updateComment(f.id,e.target.value)} placeholder="Comentario..." rows={1} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
+                {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:4 }}>Ver / Descargar ↗</a>}
+                <button style={{ ...btnD, marginTop:6 }} onClick={()=>remove(f.id)}>Eliminar</button>
+              </div>
             </div>
-            <div style={{ padding:'8px 10px' }}>
-              <div style={{ fontSize:11, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.name}</div>
-              <div style={{ fontSize:10, color:'var(--text3)', marginTop:1 }}>{f.date} · {f.size?(f.size/1024).toFixed(0)+'KB':''}</div>
-              <input style={{ ...iStyle, marginTop:6, fontSize:11, padding:'4px 7px' }} value={f.comment||''} onChange={e=>updateComment(f.id,e.target.value)} placeholder="Comentario..." />
-              {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:2 }}>Ver archivo ↗</a>}
-              <button style={{ ...btnD, marginTop:6 }} onClick={()=>remove(f.id)}>Eliminar</button>
-            </div>
-          </div>
+          )
         })}
       </div>
     </div>
   )
 }
-
-
-// ─── Mi Semana ────────────────────────────────────────────────────────────────
-const SEMAFORO = [
-  { value:'rojo', label:'🔴 Urgente', color:'#E24B4A' },
-  { value:'amarillo', label:'🟡 En proceso', color:'#EF9F27' },
-  { value:'verde', label:'🟢 Listo', color:'#1D9E75' },
-]
 
 function MiSemanaPanel({ user }) {
   const [cortes, setCortes] = useLS(`misemana_${user.id}`, [])
