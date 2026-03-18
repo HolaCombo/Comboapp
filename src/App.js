@@ -800,54 +800,47 @@ function BudgetPanel({ projectKey }) {
 
 function TrackingPanel({ projectKey }) {
   const { data: allTasks, insert: insertTaskDB, update: updateTask, remove: removeTaskDB } = useSupabaseTable('tracking', `tracking_${projectKey}`, [], 'created_at')
-  const tasks = (Array.isArray(allTasks) ? allTasks : []).filter(r => !r.project_key || r.project_key === projectKey)
+  const tasks = (Array.isArray(allTasks)?allTasks:[]).filter(r => !r.project_key || r.project_key === projectKey)
   const insertTask = row => insertTaskDB({...row, project_key: projectKey})
   const removeTask = id => removeTaskDB(id)
+
+  // Tracking files in Supabase
+  const { data: allTFiles, insert: insertTFile, update: updateTFile, remove: removeTFile } = useSupabaseTable('tracking_files', `tfiles_${projectKey}`, [], 'created_at')
+  const taskFiles = (Array.isArray(allTFiles)?allTFiles:[]).filter(f => f.project_key === projectKey)
+
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(null)
   const [newName, setNewName] = useState('')
   const [newAssignee, setNewAssignee] = useState('')
   const [uploading, setUploading] = useState(null)
 
-  const toggle = id => {
-    const task = tasks.find(x=>x.id===id)
-    if (task) updateTask(id, { done: !task.done })
-  }
-
-  const addTask = () => {
-    if(!newName.trim()) return
-    insertTask({ name:newName.trim(), project:'General', assignee:newAssignee||'Sin asignar', done:false, week:'hoy', files:[] })
-    setNewName(''); setNewAssignee('')
-  }
+  const toggle = id => { const task = tasks.find(x=>x.id===id); if(task) updateTask(id,{done:!task.done}) }
+  const addTask = () => { if(!newName.trim()) return; insertTask({name:newName.trim(),project:'General',assignee:newAssignee||'Sin asignar',done:false,week:'hoy'}); setNewName(''); setNewAssignee('') }
 
   const addFile = async (taskId, file) => {
     setUploading(taskId)
-    const task = tasks.find(x=>x.id===taskId)
-    const existingFiles = task?.files || []
-    // Try cloud upload first
-    const uploaded = await uploadFile(file)
-    const fileRecord = uploaded
-      ? { id:Date.now(), name:file.name, type:file.type, size:file.size, url:uploaded.url, path:uploaded.path, date:new Date().toLocaleDateString('es-MX'), comment:'' }
-      : await new Promise(res => { const r=new FileReader(); r.onload=e=>res({ id:Date.now(), name:file.name, type:file.type, size:file.size, url:e.target.result, date:new Date().toLocaleDateString('es-MX'), comment:'' }); r.readAsDataURL(file) })
-    await updateTask(taskId, { files: [...existingFiles, fileRecord] })
+    try {
+      const uploaded = await uploadFile(file)
+      if (uploaded) {
+        await insertTFile({ task_id:String(taskId), project_key:projectKey, name:file.name, file_type:file.type||'', size:file.size, url:uploaded.url, path:uploaded.path, comment:'', upload_date:new Date().toLocaleDateString('es-MX') })
+      } else {
+        if (file.size > 5*1024*1024) { alert(`${file.name} es muy grande. Verifica tu conexión.`); return }
+        const url = await new Promise((res,rej)=>{const r=new FileReader();r.onload=ev=>res(ev.target.result);r.onerror=rej;r.readAsDataURL(file)})
+        await insertTFile({ task_id:String(taskId), project_key:projectKey, name:file.name, file_type:file.type||'', size:file.size, url, path:'', comment:'', upload_date:new Date().toLocaleDateString('es-MX') })
+      }
+    } catch(err) { alert(`Error: ${err.message}`) }
     setUploading(null)
   }
 
-  const updateFileComment = (taskId, fileId, comment) => {
-    const task = tasks.find(x=>x.id===taskId)
-    if (!task) return
-    updateTask(taskId, { files: (task.files||[]).map(f=>f.id===fileId?{...f,comment}:f) })
-  }
-
-  const removeFile = async (taskId, fileId) => {
-    const task = tasks.find(x=>x.id===taskId)
-    if (!task) return
-    const file = (task.files||[]).find(f=>f.id===fileId)
-    if (file?.path) await deleteFile(file.path)
-    updateTask(taskId, { files: (task.files||[]).filter(f=>f.id!==fileId) })
+  const updateFileComment = (fileId, comment) => updateTFile(fileId, { comment })
+  const removeFile = async (fileId) => {
+    const f = taskFiles.find(x=>x.id===fileId)
+    if (f?.path) await deleteFile(f.path)
+    removeTFile(fileId)
   }
 
   const visible = tasks.filter(t=>filter==='all'||(filter==='pending'&&!t.done)||(filter==='done'&&t.done))
+
   return (
     <div>
       <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
@@ -856,50 +849,62 @@ function TrackingPanel({ projectKey }) {
         ))}
       </div>
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-        {visible.map(t=>(
-          <div key={t.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 14px', cursor:'pointer' }} onClick={()=>setExpanded(expanded===t.id?null:t.id)}>
-              <div onClick={e=>{e.stopPropagation();toggle(t.id)}} style={{ width:18, height:18, borderRadius:4, border:t.done?'none':'1.5px solid var(--border2)', background:t.done?'var(--green)':'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, color:'white', fontSize:11 }}>{t.done&&'✓'}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:13, textDecoration:t.done?'line-through':'none', color:t.done?'var(--text3)':'var(--text)' }}>{t.name}</div>
-                <div style={{ fontSize:11, color:'var(--text3)' }}>{t.project} · {t.week}{t.files?.length>0?` · ${t.files.length} archivo${t.files.length>1?'s':''}`:''}</div>
+        {visible.map(t=>{
+          const tFiles = taskFiles.filter(f=>String(f.task_id)===String(t.id))
+          return (
+            <div key={t.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 14px', cursor:'pointer' }} onClick={()=>setExpanded(expanded===t.id?null:t.id)}>
+                <div onClick={e=>{e.stopPropagation();toggle(t.id)}} style={{ width:18, height:18, borderRadius:4, border:t.done?'none':'1.5px solid var(--border2)', background:t.done?'var(--green)':'transparent', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', flexShrink:0, color:'white', fontSize:11 }}>{t.done&&'✓'}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, textDecoration:t.done?'line-through':'none', color:t.done?'var(--text3)':'var(--text)' }}>{t.name}</div>
+                  <div style={{ fontSize:11, color:'var(--text3)' }}>{t.project} · {t.week}{tFiles.length>0?` · ${tFiles.length} archivo${tFiles.length>1?'s':''}`:''}</div>
+                </div>
+                <div style={{ fontSize:11, padding:'2px 8px', borderRadius:20, background:'var(--bg3)', color:'var(--text2)' }}>{t.assignee}</div>
+                <div style={{ fontSize:11, color:'var(--text3)' }}>{expanded===t.id?'▲':'▼'}</div>
               </div>
-              <div style={{ fontSize:11, padding:'2px 8px', borderRadius:20, background:'var(--bg3)', color:'var(--text2)' }}>{t.assignee}</div>
-              <div style={{ fontSize:11, color:'var(--text3)' }}>{expanded===t.id?'▲':'▼'}</div>
+              {expanded===t.id&&(
+                <div style={{ borderTop:'0.5px solid var(--border)', padding:'12px 14px' }}>
+                  <div style={{ fontSize:11, fontWeight:500, color:'var(--text2)', marginBottom:10 }}>Historial de entregables</div>
+                  {tFiles.length===0&&<div style={{ fontSize:12, color:'var(--text3)', marginBottom:10 }}>Sin archivos adjuntos aún.</div>}
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:10, marginBottom:12 }}>
+                    {tFiles.map(f=>{
+                      const ext = f.name?.split('.').pop()?.toLowerCase()
+                      const isImg = f.file_type?.startsWith('image/')||['jpg','jpeg','png','gif','webp'].includes(ext)
+                      const isVid = f.file_type?.startsWith('video/')||['mp4','mov','avi','webm'].includes(ext)
+                      return (
+                        <div key={f.id} style={{ background:'var(--bg2)', border:'0.5px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
+                          <div style={{ aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                            {isImg&&<img src={f.url} alt={f.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} />}
+                            {isVid&&<video src={f.url} style={{ width:'100%', height:'100%', objectFit:'cover' }} muted controls />}
+                            {!isImg&&!isVid&&<div style={{ fontSize:24 }}>📄</div>}
+                          </div>
+                          <div style={{ padding:'8px 10px' }}>
+                            <div style={{ fontSize:11, fontWeight:500, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.name}</div>
+                            <div style={{ fontSize:10, color:'var(--text3)', marginBottom:4 }}>{f.upload_date} · {f.size?(f.size/1024/1024).toFixed(1)+'MB':''}</div>
+                            <textarea
+                              value={f.comment||''}
+                              onChange={e=>updateFileComment(f.id,e.target.value)}
+                              placeholder="Comentario visible para todos..."
+                              rows={1}
+                              style={{ ...iStyle, fontSize:11, padding:'4px 7px', resize:'none', overflow:'hidden', lineHeight:1.5 }}
+                              onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}}
+                            />
+                            {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:4 }}>Ver / Descargar ↗</a>}
+                            <button style={{ ...btnD, marginTop:4, fontSize:10 }} onClick={()=>removeFile(f.id)}>Eliminar</button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div style={{ position:'relative', display:'inline-block' }}>
+                    <button style={btnS} disabled={uploading===t.id}>{uploading===t.id?'Subiendo...':'+ Adjuntar archivo'}</button>
+                    <input type="file" multiple accept="image/*,video/*,audio/*,.pdf,.zip,.jpg,.jpeg,.png,.mov,.mp4" onChange={e=>Array.from(e.target.files).forEach(f=>addFile(t.id,f))} style={{ position:'absolute', inset:0, opacity:0, cursor:uploading===t.id?'wait':'pointer' }} disabled={uploading===t.id} />
+                  </div>
+                </div>
+              )}
             </div>
-            {expanded===t.id&&(
-              <div style={{ borderTop:'0.5px solid var(--border)', padding:'12px 14px' }}>
-                <div style={{ fontSize:11, fontWeight:500, color:'var(--text2)', marginBottom:10 }}>Historial de entregables</div>
-                {(!t.files||t.files.length===0)&&<div style={{ fontSize:12, color:'var(--text3)', marginBottom:10 }}>Sin archivos adjuntos aún.</div>}
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:10, marginBottom:12 }}>
-                  {(t.files||[]).map(f=>{
-                    const isImg=f.type?.startsWith('image/'), isVid=f.type?.startsWith('video/')
-                    return (
-                      <div key={f.id} style={{ background:'var(--bg2)', border:'0.5px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
-                        <div style={{ aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-                          {isImg&&<img src={f.src} alt={f.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} />}
-                          {isVid&&<video src={f.src} style={{ width:'100%', height:'100%', objectFit:'cover' }} muted />}
-                          {!isImg&&!isVid&&<div style={{ fontSize:24 }}>📄</div>}
-                        </div>
-                        <div style={{ padding:'8px 10px' }}>
-                          <div style={{ fontSize:11, fontWeight:500, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.name}</div>
-                          <div style={{ fontSize:10, color:'var(--text3)', marginBottom:4 }}>{f.date} · {f.size?(f.size/1024).toFixed(0)+'KB':''}</div>
-                          <textarea style={{ ...iStyle, fontSize:11, padding:'4px 7px', resize:'none', overflow:'hidden', lineHeight:1.5 }} value={f.comment||''} onChange={e=>updateFileComment(t.id,f.id,e.target.value)} placeholder="Comentario..." rows={1} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
-                          {f.url&&!f.url.startsWith('data:')&&<a href={f.url} target="_blank" rel="noreferrer" style={{ fontSize:10, color:'var(--blue)', display:'block', marginTop:2 }}>Ver archivo ↗</a>}
-                          <button style={{ ...btnD, marginTop:4, fontSize:10 }} onClick={()=>removeFile(t.id,f.id)}>Eliminar</button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div style={{ position:'relative', display:'inline-block' }}>
-                  <button style={btnS} disabled={uploading===t.id}>{uploading===t.id?'Subiendo...':'+ Adjuntar archivo'}</button>
-                  <input type="file" multiple accept="image/*,video/*,audio/*,.pdf,.zip" onChange={e=>Array.from(e.target.files).forEach(f=>addFile(t.id,f))} style={{ position:'absolute', inset:0, opacity:0, cursor: uploading===t.id?'wait':'pointer' }} />
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </div>
       <div style={{ display:'flex', gap:8, marginTop:16 }}>
         <input style={{ ...iStyle, flex:1, marginBottom:0 }} value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Nueva tarea..." onKeyDown={e=>e.key==='Enter'&&addTask()} />
