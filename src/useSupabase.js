@@ -47,7 +47,8 @@ export function useSupabaseTable(table, localKey, init, orderCol = 'created_at')
     // Optimistic
     setData(d => { const n=d.map(x=>x.id===id?{...x,...changes}:x); localStorage.setItem(localKey,JSON.stringify(n)); return n })
     if (!supabase) return
-    supabase.from(table).update(changes).eq('id', id)
+    const { error } = await supabase.from(table).update(changes).eq('id', id)
+    if (error) console.error(`Supabase update error [${table}]:`, error.message, changes)
   }
 
   const remove = async (id) => {
@@ -152,4 +153,55 @@ export function useSupabaseDoc(table, projectKey, init) {
   }, [table, projectKey, colName, lsKey])
 
   return [data, save]
+}
+
+// Simple fetch hook - NO realtime subscription, just load once + manual refresh
+export function useSupabaseFetch(table, projectKey, orderCol = 'created_at') {
+  const lsKey = `${table}_${projectKey}`
+  const [data, setData] = useState(() => {
+    try { const s = localStorage.getItem(lsKey); return s ? JSON.parse(s) : [] }
+    catch { return [] }
+  })
+  const [loading, setLoading] = useState(false)
+
+  const fetch = async () => {
+    if (!supabase) return
+    setLoading(true)
+    const { data: rows } = await supabase.from(table).select('*')
+      .eq('project_key', projectKey)
+      .order(orderCol, { ascending: true })
+    if (rows) {
+      setData(rows)
+      localStorage.setItem(lsKey, JSON.stringify(rows))
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { fetch() }, [projectKey])
+
+  const insert = async (row) => {
+    if (!supabase) {
+      const newRow = { ...row, id: Date.now() }
+      setData(d => { const n=[...d,newRow]; localStorage.setItem(lsKey,JSON.stringify(n)); return n })
+      return newRow
+    }
+    const { data: inserted } = await supabase.from(table).insert([row]).select()
+    if (inserted?.[0]) {
+      setData(d => { const n=[...d,inserted[0]]; localStorage.setItem(lsKey,JSON.stringify(n)); return n })
+      return inserted[0]
+    }
+    return null
+  }
+
+  const update = async (id, changes) => {
+    setData(d => { const n=d.map(x=>x.id===id?{...x,...changes}:x); localStorage.setItem(lsKey,JSON.stringify(n)); return n })
+    if (supabase) await supabase.from(table).update(changes).eq('id', id)
+  }
+
+  const remove = async (id) => {
+    setData(d => { const n=d.filter(x=>x.id!==id); localStorage.setItem(lsKey,JSON.stringify(n)); return n })
+    if (supabase) await supabase.from(table).delete().eq('id', id)
+  }
+
+  return { data, loading, insert, update, remove, refresh: fetch }
 }
