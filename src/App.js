@@ -81,7 +81,7 @@ function LoginScreen({ onLogin }) {
   )
 }
 
-function Dashboard({ projects, tasks }) {
+function Dashboard({ projects, tasks, deleteProject }) {
   const pending = tasks.filter(t=>!t.done).length
   return (
     <div>
@@ -99,7 +99,8 @@ function Dashboard({ projects, tasks }) {
           <div key={p.id} style={{ ...card, marginBottom:0 }}>
             <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
               <div style={{ width:10, height:10, borderRadius:'50%', background:getProjectColor(p.name, projects), flexShrink:0 }}></div>
-              <div style={{ fontSize:13, fontWeight:500 }}>{p.name}</div>
+              <div style={{ fontSize:13, fontWeight:500, flex:1 }}>{p.name}</div>
+              <button onClick={e=>{e.stopPropagation();if(window.confirm('¿Eliminar proyecto '+p.name+'?'))deleteProject(p.id)}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:'var(--text3)', padding:'2px 4px' }}>✕</button>
             </div>
             <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10 }}>{p.director} · {p.duration}</div>
             <div style={{ height:4, background:'var(--bg3)', borderRadius:2, overflow:'hidden' }}><div style={{ height:'100%', width:p.progress+'%', background:getProjectColor(p.name,projects), borderRadius:2 }}></div></div>
@@ -586,8 +587,8 @@ function GanttPanel({ projects, projectKey }) {
                 <React.Fragment key={proj}>
                   <div style={{ height:26, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
                   {validRows.filter(r=>(r.project||'General')===proj).map(r=>{
-                    const color = getProjectColor(r.project, projects)||'#888'
-                    const op = STATUS_OP[r.status]||0.6
+                    const color = STATUS_COLORS_BAR[r.status]||'#1D9E75'
+                    const op = 1
                     const sD=parseDate(r.start), eD=parseDate(r.end)
                     const barL = zoom==='week'?(diffDays(minD,sD)/7)*CELL:((sD-minD)/(maxD-minD))*totalW
                     const barW = zoom==='week'?Math.max(CELL,(diffDays(sD,eD)/7)*CELL):Math.max(24,((eD-sD)/(maxD-minD))*totalW)
@@ -1365,7 +1366,7 @@ export default function App() {
   const [theme, setTheme] = useTheme()
   const [user, setUser] = useState(null)
   const [active, setActive] = useState('dashboard')
-  const { data: projects, insert: insertProject } = useSupabaseTable('projects', 'projects', seedProjects)
+  const { data: projects, insert: insertProject, remove: deleteProject } = useSupabaseTable('projects', 'projects', seedProjects)
   const { data: tasks } = useSupabaseTable('tasks', 'tracking_tasks', seedTasks)
   const [currentProject, setCurrentProject] = useState(0)
   const [showModal, setShowModal] = useState(false)
@@ -1390,7 +1391,7 @@ export default function App() {
 
   const renderPanel = () => {
     switch(active) {
-      case 'dashboard': return <Dashboard projects={projects} tasks={tasks} />
+      case 'dashboard': return <Dashboard projects={projects} tasks={tasks} deleteProject={deleteProject} />
       case 'misemana': return <MiSemanaPanel user={user} />
       case 'script': return <ScriptPanel projectKey={projectKey} />
       case 'breakdown': return <BreakdownPanel projectKey={projectKey} />
