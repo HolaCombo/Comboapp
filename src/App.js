@@ -385,23 +385,29 @@ function StoryboardPanel({ projectKey }) {
   const [syncing, setSyncing] = useState(false)
   const [initialized, setInitialized] = useState(false)
 
-  // Initialize local state from DB - always sync when DB changes
+  // Load from DB on mount and when projectKey changes
+  // We only sync FROM db when local panels is empty (page load/refresh)
+  // After that, local state is the source of truth until page reload
   useEffect(() => {
-    const filtered = (Array.isArray(dbPanels)?dbPanels:[])
+    if (!Array.isArray(dbPanels)) return
+    const filtered = dbPanels
       .filter(p=>p.project_key===projectKey)
       .sort((a,b)=>(a.panel_order||0)-(b.panel_order||0))
-    if (!initialized && Array.isArray(dbPanels)) {
-      // First load - set from DB
-      setPanels(filtered.map(p=>({...p, img: p.img_url||'', desc: p.descripcion||''})))
-      setInitialized(true)
-    } else if (initialized && filtered.length > panels.length) {
-      // New panel added by another user - add it
-      const newOnes = filtered.filter(fp => !panels.find(p=>p.id===fp.id))
-      if (newOnes.length > 0) {
-        setPanels(prev => [...prev, ...newOnes.map(p=>({...p,img:p.img_url||'',desc:p.descripcion||''}))])
+    setPanels(prev => {
+      if (prev.length === 0) {
+        // Fresh load - take everything from DB
+        return filtered.map(p=>({...p, img:p.img_url||'', desc:p.descripcion||''}))
       }
-    }
-  }, [dbPanels, projectKey, initialized])
+      // Already have local data - only add panels that don't exist locally yet
+      const existingIds = new Set(prev.map(x=>x.id))
+      const newFromDb = filtered.filter(p=>!existingIds.has(p.id))
+      if (newFromDb.length > 0) {
+        return [...prev, ...newFromDb.map(p=>({...p,img:p.img_url||'',desc:p.descripcion||''}))]
+      }
+      return prev
+    })
+    setInitialized(true)
+  }, [dbPanels, projectKey])
 
   const add = async () => {
     const order = panels.length
@@ -421,9 +427,14 @@ function StoryboardPanel({ projectKey }) {
     setPanels(prev => prev.map(p=>p.id===id?{...p,[key]:val}:p))
   }
 
-  const saveToDb = (id, key, val) => {
+  const saveToDb = async (id, key, val) => {
+    if (!id) return
     const dbKey = key==='img'?'img_url':key==='desc'?'descripcion':key
-    updatePanelDB(id, { [dbKey]: val })
+    try {
+      await updatePanelDB(id, { [dbKey]: val })
+    } catch(e) {
+      console.error('saveToDb error:', key, e)
+    }
   }
 
   const loadImg = async (id, file) => {
