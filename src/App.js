@@ -132,6 +132,7 @@ function ScriptPanel({ projectKey }) {
   const add = type => setLines([...lines, {type,text:''}])
   const update = (i,text) => setLines(lines.map((x,idx)=>idx===i?{...x,text}:x))
   const remove = i => setLines(lines.filter((_,idx)=>idx!==i))
+  // setLines is the save function from useSupabaseDoc
   return (
     <div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
@@ -163,9 +164,9 @@ function BreakdownPanel({ projectKey }) {
   const [mode, setMode] = useState('arte')
   const [importing, setImporting] = useState(false)
   const artistColor = name => { const idx = ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
-  const update = (id,key,val) => setRows(r=>r.map(x=>x.id===id?{...x,[key]:val}:x))
-  const addRow = () => setRows(r=>[...r,{ id:Date.now(), numEscena:'', secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:'', desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'' }])
-  const remove = id => setRows(r=>r.filter(x=>x.id!==id))
+  const update = (id,key,val) => setRows(rows.map(x=>x.id===id?{...x,[key]:val}:x))
+  const addRow = () => setRows([...rows,{ id:Date.now(), numEscena:'', secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:'', desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'' }])
+  const remove = id => setRows(rows.filter(x=>x.id!==id))
 
   const handleImport = (e) => {
     const file = e.target.files[0]
@@ -178,7 +179,7 @@ function BreakdownPanel({ projectKey }) {
       // Import as single visual row
       const reader = new FileReader()
       reader.onload = ev => {
-        setRows(r => [...r, { id:Date.now(), numEscena:String(r.length+1), secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:`Importado: ${file.name}`, desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'', importedImg: ev.target.result }])
+        setRows([...rows, { id:Date.now(), numEscena:String(rows.length+1), secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:`Importado: ${file.name}`, desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'', importedImg: ev.target.result }])
         setImporting(false)
       }
       reader.readAsDataURL(file)
@@ -196,7 +197,7 @@ function BreakdownPanel({ projectKey }) {
             headers.forEach((h,idx) => { obj[h] = vals[idx]||'' })
             return { id:Date.now()+i, numEscena:obj['escena']||obj['#']||String(i+1), secuencia:obj['secuencia']||obj['seq']||'', inF:parseInt(obj['in'])||0, outF:parseInt(obj['out'])||0, frames:parseInt(obj['frames'])||0, fps:parseInt(obj['fps'])||8, timecode:obj['timecode']||obj['h:m:s:f']||'', personajes:obj['personajes']||obj['characters']||'', desglosArte:obj['desglose arte']||obj['arte']||obj['opening']||'', desglosAnim:obj['desglose animacion']||obj['animacion']||obj['storyline']||'', artista:obj['artista']||obj['artist']||'', animador:obj['animador']||'', dias:parseInt(obj['dias'])||0, estatus:obj['estatus']||obj['status']||'pendiente', comentarios:obj['comentarios']||obj['comments']||'' }
           })
-          setRows(r => [...r, ...newRows])
+          setRows([...rows, ...newRows])
         } catch(err) { alert('Error al leer el archivo. Verifica el formato.') }
         setImporting(false)
       }
@@ -257,9 +258,9 @@ function StoryboardPanel({ projectKey }) {
   const [view, setView] = useState('cards') // cards | table
   const [importing, setImporting] = useState(false)
 
-  const add = () => setPanels(p=>[...p,{id:Date.now(),img:null,desc:'',duration:'',artista:'',dialogo:'',comentarios:'',estatus:'pendiente'}])
-  const remove = id => setPanels(p=>p.filter(x=>x.id!==id))
-  const update = (id,key,val) => setPanels(p=>p.map(x=>x.id===id?{...x,[key]:val}:x))
+  const add = () => setPanels([...panels,{id:Date.now(),img:null,desc:'',duration:'',artista:'',dialogo:'',comentarios:'',estatus:'pendiente'}])
+  const remove = id => setPanels(panels.filter(x=>x.id!==id))
+  const update = (id,key,val) => setPanels(panels.map(x=>x.id===id?{...x,[key]:val}:x))
   const loadImg = (id,file) => { const r=new FileReader(); r.onload=e=>update(id,'img',e.target.result); r.readAsDataURL(file) }
 
   const handleImport = (e) => {
@@ -271,7 +272,7 @@ function StoryboardPanel({ projectKey }) {
     if (isImg) {
       const reader = new FileReader()
       reader.onload = ev => {
-        setPanels(p=>[...p,{id:Date.now(),img:ev.target.result,desc:`Importado: ${file.name}`,duration:'',artista:'',dialogo:'',comentarios:'',estatus:'pendiente'}])
+        setPanels([...panels,{id:Date.now(),img:ev.target.result,desc:`Importado: ${file.name}`,duration:'',artista:'',dialogo:'',comentarios:'',estatus:'pendiente'}])
         setImporting(false)
       }
       reader.readAsDataURL(file)
@@ -285,7 +286,7 @@ function StoryboardPanel({ projectKey }) {
           const obj = {}; headers.forEach((h,idx)=>{ obj[h]=vals[idx]||'' })
           return { id:Date.now()+i, img:null, desc:obj['descripcion']||obj['desc']||obj['storyline']||obj['opening']||'', duration:obj['duracion']||obj['duration']||'', artista:obj['artista']||obj['artist']||'', dialogo:obj['dialogo']||obj['dialogue']||'', comentarios:obj['comentarios']||'', estatus:obj['estatus']||obj['status']||'pendiente' }
         })
-        setPanels(p=>[...p,...newPanels])
+        setPanels([...panels,...newPanels])
         setImporting(false)
       }
       reader.readAsText(file)
@@ -1226,6 +1227,15 @@ function TranscripcionPanel({ projectKey }) {
     const text = mode==='timecodes' ? (item.textTC||item.text) : item.text
     navigator.clipboard.writeText(text)
   }
+  const downloadText = (item, fmt) => {
+    const text = fmt==='timecodes' ? (item.textTC||item.text) : item.text
+    const filename = item.name.replace(/\.[^.]+$/, '') + (fmt==='timecodes' ? '_timecodes' : '') + '.txt'
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const fmtSize = b => b > 1024*1024 ? (b/1024/1024).toFixed(1)+'MB' : (b/1024).toFixed(0)+'KB'
   const fmtDur = s => s ? `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} min` : ''
@@ -1307,7 +1317,9 @@ function TranscripcionPanel({ projectKey }) {
                       <div style={{ fontSize:13, fontWeight:500 }}>{item.name}</div>
                       <div style={{ fontSize:11, color:'var(--text3)' }}>{item.date}{item.duration?` · ${fmtDur(item.duration)}`:''}</div>
                     </div>
-                    <button style={btnS} onClick={()=>copyText(item)}>Copiar {mode==='timecodes'?'con TC':'texto'}</button>
+                    <button style={btnS} onClick={()=>copyText(item)}>Copiar</button>
+                    <button style={btnS} onClick={()=>downloadText(item,'texto')}>↓ .txt</button>
+                    {item.textTC&&<button style={btnS} onClick={()=>downloadText(item,'timecodes')}>↓ .txt TC</button>}
                     <button style={btnD} onClick={()=>removeItem(item.id)}>✕</button>
                   </div>
                   {mode==='timecodes' && item.textTC ? (
