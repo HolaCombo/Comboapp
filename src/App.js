@@ -378,50 +378,75 @@ function BreakdownPanel({ projectKey }) {
 }
 
 function StoryboardPanel({ projectKey }) {
-  const [panels, setPanels] = useSupabaseDoc('storyboards', projectKey, [])
-  const [view, setView] = useState('cards') // cards | table
+  const { data: rawPanels, insert: insertPanel, update: updatePanelDB, remove: removePanelDB } = useSupabaseTable('storyboard_panels', `sb_${projectKey}`, [], 'panel_order')
+  const panels = (Array.isArray(rawPanels)?rawPanels:[]).filter(p=>p.project_key===projectKey).sort((a,b)=>a.panel_order-b.panel_order)
+  const [view, setView] = useState('cards')
   const [importing, setImporting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
-  const add = () => setPanels([...panels,{id:Date.now(),img:null,desc:'',duration:'',artista:'',dialogo:'',comentarios:'',estatus:'pendiente'}])
-  const remove = id => setPanels(panels.filter(x=>x.id!==id))
-  const update = (id,key,val) => setPanels(panels.map(x=>x.id===id?{...x,[key]:val}:x))
-  const loadImg = (id,file) => { const r=new FileReader(); r.onload=e=>update(id,'img',e.target.result); r.readAsDataURL(file) }
+  const add = async () => {
+    const order = panels.length
+    await insertPanel({ project_key:projectKey, panel_order:order, img_url:'', img_path:'', descripcion:'', dialogo:'', comentarios:'', duracion:'', artista:'', estatus:'pendiente' })
+  }
 
-  const handleImport = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    setImporting(true)
-    const isImg = file.type.startsWith('image/')
-    const isPDF = file.type === 'application/pdf'
-    if (isImg) {
-      const reader = new FileReader()
-      reader.onload = ev => {
-        setPanels([...panels,{id:Date.now(),img:ev.target.result,desc:`Importado: ${file.name}`,duration:'',artista:'',dialogo:'',comentarios:'',estatus:'pendiente'}])
-        setImporting(false)
-      }
-      reader.readAsDataURL(file)
-    } else if (file.name.endsWith('.csv')) {
-      const reader = new FileReader()
-      reader.onload = ev => {
-        const lines = ev.target.result.split('\n').filter(l=>l.trim())
-        const headers = lines[0].split(',').map(h=>h.trim().toLowerCase())
-        const newPanels = lines.slice(1).map((line,i)=>{
-          const vals = line.split(',').map(v=>v.trim().replace(/^"|"$/g,''))
-          const obj = {}; headers.forEach((h,idx)=>{ obj[h]=vals[idx]||'' })
-          return { id:Date.now()+i, img:null, desc:obj['descripcion']||obj['desc']||obj['storyline']||obj['opening']||'', duration:obj['duracion']||obj['duration']||'', artista:obj['artista']||obj['artist']||'', dialogo:obj['dialogo']||obj['dialogue']||'', comentarios:obj['comentarios']||'', estatus:obj['estatus']||obj['status']||'pendiente' }
-        })
-        setPanels([...panels,...newPanels])
-        setImporting(false)
-      }
-      reader.readAsText(file)
+  const remove = id => removePanelDB(id)
+
+  const update = (id, key, val) => {
+    // Map local key names to DB column names
+    const dbKey = key==='desc'?'descripcion':key==='img'?'img_url':key
+    updatePanelDB(id, { [dbKey]: val })
+  }
+
+  const loadImg = async (id, file) => {
+    const uploaded = await uploadFile(file)
+    if (uploaded) {
+      updatePanelDB(id, { img_url: uploaded.url, img_path: uploaded.path })
     } else {
-      setImporting(false)
-      alert('Para PDF puedes subir cada página como imagen. Para Excel guarda como CSV primero.')
+      const reader = new FileReader()
+      reader.onload = e => updatePanelDB(id, { img_url: e.target.result, img_path: '' })
+      reader.readAsDataURL(file)
     }
-    e.target.value=''
+  }
+
+  // Sync storyboard panels to breakdown
+  const syncToBreakdown = async () => {
+    setSyncing(true)
+    try {
+      // Get existing breakdown rows
+      const lsKey = `breakdown_rows_${projectKey}`
+      const existing = JSON.parse(localStorage.getItem(lsKey)||'[]')
+      // Build new rows from panels
+      const newRows = panels.map((p,i) => ({
+        id: Date.now()+i,
+        numEscena: String(i+1),
+        imagen: p.img_url || '',
+        secuencia: '',
+        inF: 0, outF: 0, frames: 0, fps: 8, timecode: '',
+        personajes: '',
+        desglosArte: p.descripcion || '',
+        desglosAnim: p.dialogo || '',
+        layout: '', rough: '', clean: '', color: '', composite: '',
+        artista: p.artista || '',
+        animador: '',
+        dias: 0,
+        estatus: p.estatus || 'pendiente',
+        comentarios: p.comentarios || ''
+      }))
+      localStorage.setItem(lsKey, JSON.stringify(newRows))
+      alert(`✅ ${newRows.length} paneles sincronizados al Breakdown.`)
+    } catch(err) { alert('Error al sincronizar: '+err.message) }
+    setSyncing(false)
   }
 
   const artistColor = name => { const idx=ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
+  const downloadPDF = () => window.print()
+
+  // Normalize panel fields
+  const p2local = p => ({
+    ...p,
+    img: p.img_url||'',
+    desc: p.descripcion||'',
+  })
 
   return (
     <div>
@@ -430,46 +455,58 @@ function StoryboardPanel({ projectKey }) {
           <button key={v} style={{ padding:'6px 16px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:view===v?'var(--green)':'transparent', color:view===v?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setView(v)}>{label}</button>
         ))}
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-          <div style={{ position:'relative' }}>
-            <button style={btnS} disabled={importing}>{importing?'Importando...':'↑ Importar'}</button>
-            <input type="file" accept=".csv,.pdf,image/*" onChange={handleImport} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={importing} />
-          </div>
-          <button style={btnS} onClick={()=>window.print()}>↓ PDF</button>
+          <button style={{ ...btnS, background:'var(--blue-light)', color:'var(--blue)', borderColor:'var(--blue)' }} onClick={syncToBreakdown} disabled={syncing}>
+            {syncing?'Sincronizando...':'⇄ Sincronizar al Breakdown'}
+          </button>
+          <button style={btnS} onClick={downloadPDF}>↓ PDF</button>
         </div>
       </div>
 
       {view==='cards' ? (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))', gap:16 }}>
-          {panels.map((p,i)=>(
-            <div key={p.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
-              <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span>Panel {i+1}</span>
-                <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                  <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)} style={{ fontSize:10, border:'none', background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', cursor:'pointer', outline:'none', borderRadius:4, padding:'2px 4px', fontWeight:500 }}>
-                    {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>remove(p.id)}>✕</button>
+          {panels.map((p,i)=>{
+            const lp = p2local(p)
+            return (
+              <div key={p.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
+                <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span>Panel {i+1}</span>
+                  <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                    <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)}
+                      style={{ fontSize:10, border:'none', background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', cursor:'pointer', outline:'none', borderRadius:4, padding:'2px 4px', fontWeight:500 }}>
+                      {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>remove(p.id)}>✕</button>
+                  </div>
+                </div>
+                <div style={{ position:'relative', aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                  {lp.img ? <img src={lp.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> :
+                    <div style={{ textAlign:'center', pointerEvents:'none' }}><div style={{ fontSize:22, color:'var(--text3)' }}>+</div><div style={{ fontSize:11, color:'var(--text3)' }}>Subir imagen</div></div>}
+                  <input type="file" accept="image/*" className="no-print" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+                </div>
+                <div style={{ padding:'8px 12px 4px' }}>
+                  <textarea value={lp.desc} onChange={e=>update(p.id,'descripcion',e.target.value)} placeholder="Descripción / Acción..."
+                    rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, overflow:'hidden' }}
+                    onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                </div>
+                <div style={{ padding:'0 12px 4px' }}>
+                  <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} placeholder="Diálogo / Guión..."
+                    rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic', overflow:'hidden' }}
+                    onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                </div>
+                <div style={{ padding:'0 12px 4px' }}>
+                  <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} placeholder="Comentarios..."
+                    rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px', overflow:'hidden' }}
+                    onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                </div>
+                <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
+                  <input value={p.duracion||''} onChange={e=>update(p.id,'duracion',e.target.value)} placeholder="Dur: 3s"
+                    style={{ ...TDI, fontSize:11, color:'var(--text3)', width:70 }} />
+                  <input value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} placeholder="Artista"
+                    style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', flex:1 }} />
                 </div>
               </div>
-              <div style={{ position:'relative', aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-                {p.img ? <img src={p.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <div style={{ textAlign:'center', pointerEvents:'none' }}><div style={{ fontSize:22, color:'var(--text3)' }}>+</div><div style={{ fontSize:11, color:'var(--text3)' }}>Subir imagen</div></div>}
-                <input type="file" accept="image/*" className="no-print" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
-              </div>
-              <div style={{ padding:'8px 12px 4px' }}>
-                <textarea value={p.desc||''} onChange={e=>update(p.id,'desc',e.target.value)} placeholder="Descripción / Acción..." rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5 }} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
-              </div>
-              <div style={{ padding:'0 12px 4px' }}>
-                <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} placeholder="Diálogo / Guión..." rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic' }} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
-              </div>
-              <div style={{ padding:'0 12px 4px' }}>
-                <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} placeholder="Comentarios..." rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px' }} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px"}} />
-              </div>
-              <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
-                <input value={p.duration||''} onChange={e=>update(p.id,'duration',e.target.value)} placeholder="Duración: 3s" style={{ ...TDI, fontSize:11, color:'var(--text3)', width:80 }} />
-                <input value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', width:80 }} placeholder="Artista" />
-              </div>
-            </div>
-          ))}
+            )
+          })}
           <button onClick={add} className="no-print" style={{ border:'1.5px dashed var(--border2)', background:'transparent', borderRadius:14, aspectRatio:'16/9', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'var(--text3)', fontSize:12 }}>+ Nuevo panel</button>
         </div>
       ) : (
@@ -478,43 +515,54 @@ function StoryboardPanel({ projectKey }) {
           <table style={{ borderCollapse:'collapse', fontSize:12, background:'var(--bg)', width:'100%' }}>
             <thead>
               <tr>
-                {['#','Imagen','Desglose Arte / Acción','Artista','Diálogo / Guión','Comentarios','Duración','Estatus'].map(h=>(
+                {['#','Imagen','Descripción / Acción','Artista','Diálogo / Guión','Comentarios','Duración','Estatus'].map(h=>(
                   <th key={h} style={TH}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {panels.map((p,i)=>(
-                <tr key={p.id}>
-                  <td style={{ ...TD, width:30, textAlign:'center', fontWeight:500, color:'var(--text3)' }}>{i+1}</td>
-                  <td style={{ ...TD, width:120 }}>
-                    <div style={{ position:'relative', width:100, height:56, background:'var(--bg3)', borderRadius:6, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      {p.img ? <img src={p.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <span style={{ fontSize:10, color:'var(--text3)' }}>Sin imagen</span>}
-                      <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
-                    </div>
-                  </td>
-                  <td style={{ ...TD, width:200 }}>
-                    <textarea value={p.desc||''} onChange={e=>update(p.id,'desc',e.target.value)} rows={2} style={{ ...TDI, resize:'none', lineHeight:1.4 }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                  </td>
-                  <td style={{ ...TD, width:90 }}>
-                    <input value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} style={{ ...TDI, color:p.artista?artistColor(p.artista):'var(--text3)', fontWeight:500 }} placeholder="—" />
-                  </td>
-                  <td style={{ ...TD, width:180 }}>
-                    <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} rows={2} style={{ ...TDI, resize:'none', lineHeight:1.4, fontStyle:'italic' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                  </td>
-                  <td style={{ ...TD, width:160 }}>
-                    <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} rows={2} style={{ ...TDI, resize:'none', lineHeight:1.4, color:'var(--green-dark)' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                  </td>
-                  <td style={{ ...TD, width:70 }}>
-                    <input value={p.duration||''} onChange={e=>update(p.id,'duration',e.target.value)} style={{ ...TDI, width:60 }} placeholder="3s" />
-                  </td>
-                  <td style={{ ...TD, width:100 }}>
-                    <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)} style={{ ...TDI, background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>
-                      {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </td>
-                </tr>
-              ))}
+              {panels.map((p,i)=>{
+                const lp = p2local(p)
+                return (
+                  <tr key={p.id}>
+                    <td style={{ ...TD, width:30, textAlign:'center', fontWeight:500, color:'var(--text3)' }}>{i+1}</td>
+                    <td style={{ ...TD, width:120 }}>
+                      <div style={{ position:'relative', width:100, height:56, background:'var(--bg3)', borderRadius:6, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                        {lp.img ? <img src={lp.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <span style={{ fontSize:10, color:'var(--text3)' }}>Sin imagen</span>}
+                        <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+                      </div>
+                    </td>
+                    <td style={{ ...TD, width:200 }}>
+                      <textarea value={lp.desc} onChange={e=>update(p.id,'descripcion',e.target.value)} rows={2}
+                        style={{ ...TDI, resize:'none', lineHeight:1.4, overflow:'hidden' }}
+                        onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                    </td>
+                    <td style={{ ...TD, width:90 }}>
+                      <input value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)}
+                        style={{ ...TDI, color:p.artista?artistColor(p.artista):'var(--text3)', fontWeight:500 }} placeholder="—" />
+                    </td>
+                    <td style={{ ...TD, width:180 }}>
+                      <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} rows={2}
+                        style={{ ...TDI, resize:'none', lineHeight:1.4, fontStyle:'italic', overflow:'hidden' }}
+                        onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                    </td>
+                    <td style={{ ...TD, width:160 }}>
+                      <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} rows={2}
+                        style={{ ...TDI, resize:'none', lineHeight:1.4, color:'var(--green-dark)', overflow:'hidden' }}
+                        onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                    </td>
+                    <td style={{ ...TD, width:70 }}>
+                      <input value={p.duracion||''} onChange={e=>update(p.id,'duracion',e.target.value)} style={{ ...TDI, width:60 }} placeholder="3s" />
+                    </td>
+                    <td style={{ ...TD, width:100 }}>
+                      <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)}
+                        style={{ ...TDI, background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>
+                        {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
