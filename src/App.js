@@ -121,32 +121,48 @@ function Dashboard({ projects, tasks, deleteProject }) {
 }
 
 function ScriptPanel({ projectKey }) {
-  const [lines, setLines] = useSupabaseDoc('scripts', projectKey, [
-    { type:'scene', text:'INT. DEPARTAMENTO - DÍA' },
-    { type:'action', text:'El sol entra por las persianas. VALENTINA (28) despierta sobresaltada.' },
-    { type:'character', text:'VALENTINA' },
-    { type:'parenthetical', text:'(murmurando)' },
-    { type:'dialogue', text:'¿Las ocho? No puede ser.' },
-  ])
-  const typeStyles = { scene:{ fontWeight:'bold', textTransform:'uppercase', marginTop:16, fontFamily:"'DM Mono',monospace" }, action:{ marginTop:4 }, character:{ textAlign:'center', fontWeight:'bold', marginTop:12 }, dialogue:{ margin:'0 80px' }, parenthetical:{ margin:'0 100px', fontStyle:'italic', color:'var(--text2)' } }
-  const add = type => setLines([...lines, {type,text:''}])
-  const update = (i,text) => setLines(lines.map((x,idx)=>idx===i?{...x,text}:x))
-  const remove = i => setLines(lines.filter((_,idx)=>idx!==i))
-  // setLines is the save function from useSupabaseDoc
+  const lsMetaKey = `script_meta_${projectKey}`
+  const [meta, setMeta] = useLS(lsMetaKey, { titulo:'', autor:'', formato:'Cortometraje' })
+  const [lines, setLines] = useSupabaseDoc('scripts', projectKey, [])
+  const typeStyles = {
+    scene:{ fontWeight:'bold', textTransform:'uppercase', marginTop:16, fontFamily:"'DM Mono',monospace" },
+    action:{ marginTop:4 },
+    character:{ textAlign:'center', fontWeight:'bold', marginTop:12 },
+    dialogue:{ margin:'0 80px' },
+    parenthetical:{ margin:'0 100px', fontStyle:'italic', color:'var(--text2)' }
+  }
+  const add = type => setLines([...(Array.isArray(lines)?lines:[]), {type,text:''}])
+  const update = (i,text) => setLines((Array.isArray(lines)?lines:[]).map((x,idx)=>idx===i?{...x,text}:x))
+  const remove = i => setLines((Array.isArray(lines)?lines:[]).filter((_,idx)=>idx!==i))
+  const safeLines = Array.isArray(lines) ? lines : []
   return (
     <div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
-        {[['Título','Cortometraje Urbano'],['Autor','Ana Luisa'],['Formato','Cortometraje']].map(([f,v])=>(
-          <div key={f}><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{f}</label><input style={iStyle} defaultValue={v} /></div>
-        ))}
+        <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Título</label>
+          <input style={iStyle} value={meta.titulo} onChange={e=>setMeta(m=>({...m,titulo:e.target.value}))} placeholder="Título del guión..." /></div>
+        <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Autor</label>
+          <input style={iStyle} value={meta.autor} onChange={e=>setMeta(m=>({...m,autor:e.target.value}))} placeholder="Nombre del autor..." /></div>
+        <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Formato</label>
+          <select style={iStyle} value={meta.formato} onChange={e=>setMeta(m=>({...m,formato:e.target.value}))}>
+            {['Cortometraje','Largometraje','Serie','Spot','Documental','Animación'].map(f=><option key={f} value={f}>{f}</option>)}
+          </select>
+        </div>
       </div>
-      <div style={{ ...card, fontFamily:"'DM Mono',monospace", fontSize:13, lineHeight:2, padding:24 }}>
-        {lines.map((line,i)=>(
+      <div style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, padding:24, fontFamily:"'DM Mono',monospace", fontSize:13, lineHeight:2, minHeight:400 }}>
+        {safeLines.length === 0 && <div style={{ color:'var(--text3)', fontSize:12, textAlign:'center', padding:20 }}>Agrega elementos con los botones de abajo</div>}
+        {safeLines.map((line,i)=>(
           <div key={i} style={{ display:'flex', gap:8, alignItems:'flex-start', ...typeStyles[line.type] }}>
             <div style={{ flex:1 }}>
-              <textarea value={line.text} onChange={e=>update(i,e.target.value)} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontFamily:'inherit', fontSize:'inherit', color:'var(--text)', outline:'none', lineHeight:'inherit', ...typeStyles[line.type] }} rows={1} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+              <textarea
+                value={line.text||''}
+                onChange={e=>update(i,e.target.value)}
+                placeholder={line.type==='scene'?'INT./EXT. LOCACIÓN - TIEMPO':line.type==='character'?'NOMBRE PERSONAJE':line.type==='dialogue'?'Línea de diálogo...':line.type==='parenthetical'?'(indicación)':'Descripción...'}
+                style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontFamily:'inherit', fontSize:'inherit', color:'var(--text)', outline:'none', lineHeight:'inherit', overflow:'hidden' }}
+                rows={1}
+                onInput={e=>{ e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px' }}
+              />
             </div>
-            <button onClick={()=>remove(i)} style={{ ...btnD, marginTop:4 }}>✕</button>
+            <button onClick={()=>remove(i)} style={{ ...btnD, marginTop:4, flexShrink:0 }}>✕</button>
           </div>
         ))}
       </div>
@@ -168,42 +184,73 @@ function BreakdownPanel({ projectKey }) {
   const addRow = () => setRows([...rows,{ id:Date.now(), numEscena:'', secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:'', desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'' }])
   const remove = id => setRows(rows.filter(x=>x.id!==id))
 
-  const handleImport = (e) => {
+  const handleImport = async (e) => {
     const file = e.target.files[0]
     if (!file) return
     setImporting(true)
-    const isCSV = file.name.endsWith('.csv')
+    e.target.value = ''
     const isImg = file.type.startsWith('image/')
     const isPDF = file.type === 'application/pdf'
-    if (isImg || isPDF) {
-      // Import as single visual row
-      const reader = new FileReader()
-      reader.onload = ev => {
-        setRows([...rows, { id:Date.now(), numEscena:String(rows.length+1), secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:`Importado: ${file.name}`, desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'', importedImg: ev.target.result }])
-        setImporting(false)
-      }
-      reader.readAsDataURL(file)
-    } else {
-      // CSV/Excel: parse rows
-      const reader = new FileReader()
-      reader.onload = ev => {
-        try {
-          const text = ev.target.result
-          const lines = text.split('\n').filter(l=>l.trim())
-          const headers = lines[0].split(',').map(h=>h.trim().toLowerCase())
-          const newRows = lines.slice(1).map((line,i) => {
-            const vals = line.split(',').map(v=>v.trim().replace(/^"|"$/g,''))
-            const obj = {}
-            headers.forEach((h,idx) => { obj[h] = vals[idx]||'' })
-            return { id:Date.now()+i, numEscena:obj['escena']||obj['#']||String(i+1), secuencia:obj['secuencia']||obj['seq']||'', inF:parseInt(obj['in'])||0, outF:parseInt(obj['out'])||0, frames:parseInt(obj['frames'])||0, fps:parseInt(obj['fps'])||8, timecode:obj['timecode']||obj['h:m:s:f']||'', personajes:obj['personajes']||obj['characters']||'', desglosArte:obj['desglose arte']||obj['arte']||obj['opening']||'', desglosAnim:obj['desglose animacion']||obj['animacion']||obj['storyline']||'', artista:obj['artista']||obj['artist']||'', animador:obj['animador']||'', dias:parseInt(obj['dias'])||0, estatus:obj['estatus']||obj['status']||'pendiente', comentarios:obj['comentarios']||obj['comments']||'' }
+    const isXLSX = file.name.match(/\.xlsx?$/i)
+    const isCSV = file.name.match(/\.csv$/i)
+    try {
+      if (isImg || isPDF) {
+        const reader = new FileReader()
+        reader.onload = ev => {
+          setRows([...(Array.isArray(rows)?rows:[]), { id:Date.now(), numEscena:String((rows||[]).length+1), secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'', personajes:'', desglosArte:`Importado: ${file.name}`, desglosAnim:'', layout:'', rough:'', clean:'', color:'', composite:'', artista:'', animador:'', dias:0, estatus:'pendiente', comentarios:'' }])
+          setImporting(false)
+        }
+        reader.readAsDataURL(file)
+      } else if (isXLSX) {
+        // Load SheetJS from CDN to parse XLSX
+        if (!window.XLSX) {
+          await new Promise((res, rej) => {
+            const s = document.createElement('script')
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+            s.onload = res; s.onerror = rej
+            document.head.appendChild(s)
           })
-          setRows([...rows, ...newRows])
-        } catch(err) { alert('Error al leer el archivo. Verifica el formato.') }
+        }
+        const reader = new FileReader()
+        reader.onload = ev => {
+          try {
+            const wb = window.XLSX.read(ev.target.result, { type:'array' })
+            const ws = wb.Sheets[wb.SheetNames[0]]
+            const data = window.XLSX.utils.sheet_to_json(ws, { defval:'' })
+            const newRows = data.map((obj,i) => {
+              const k = key => obj[key]||obj[key.toLowerCase()]||obj[key.toUpperCase()]||''
+              return { id:Date.now()+i, numEscena:String(k('escena')||k('#')||k('num')||i+1), secuencia:k('secuencia')||k('seq')||'', inF:parseInt(k('in'))||0, outF:parseInt(k('out'))||0, frames:parseInt(k('frames')||k('cuadros'))||0, fps:parseInt(k('fps'))||8, timecode:k('timecode')||k('h:m:s:f')||'', personajes:k('personajes')||k('characters')||'', desglosArte:k('desglose arte')||k('arte')||k('opening')||k('field 2')||'', desglosAnim:k('desglose animacion')||k('animacion')||k('storyline')||'', artista:k('artista')||k('artist')||k('field 3')||'', animador:k('animador')||'', dias:parseInt(k('dias')||k('tiempo'))||0, estatus:k('estatus')||k('status')||'pendiente', comentarios:k('comentarios')||k('comments')||'' }
+            })
+            setRows([...(Array.isArray(rows)?rows:[]), ...newRows])
+          } catch(err) { alert('Error al leer el XLSX: '+err.message) }
+          setImporting(false)
+        }
+        reader.readAsArrayBuffer(file)
+      } else if (isCSV) {
+        const reader = new FileReader()
+        reader.onload = ev => {
+          try {
+            const text = ev.target.result
+            const csvLines = text.split('\n').filter(l=>l.trim())
+            const headers = csvLines[0].split(',').map(h=>h.trim().toLowerCase().replace(/^"|"$/g,''))
+            const newRows = csvLines.slice(1).map((line,i) => {
+              const vals = line.split(',').map(v=>v.trim().replace(/^"|"$/g,''))
+              const obj = {}; headers.forEach((h,idx)=>{ obj[h]=vals[idx]||'' })
+              return { id:Date.now()+i, numEscena:obj['escena']||obj['#']||String(i+1), secuencia:obj['secuencia']||'', inF:parseInt(obj['in'])||0, outF:parseInt(obj['out'])||0, frames:parseInt(obj['frames'])||0, fps:parseInt(obj['fps'])||8, timecode:obj['timecode']||'', personajes:obj['personajes']||'', desglosArte:obj['desglose arte']||obj['arte']||'', desglosAnim:obj['desglose animacion']||'', artista:obj['artista']||'', animador:obj['animador']||'', dias:parseInt(obj['dias'])||0, estatus:obj['estatus']||'pendiente', comentarios:obj['comentarios']||'' }
+            })
+            setRows([...(Array.isArray(rows)?rows:[]), ...newRows])
+          } catch(err) { alert('Error al leer CSV: '+err.message) }
+          setImporting(false)
+        }
+        reader.readAsText(file)
+      } else {
+        alert('Formato no soportado. Usa XLSX, CSV, PDF o imagen.')
         setImporting(false)
       }
-      reader.readAsText(file)
+    } catch(err) {
+      alert('Error al importar: '+err.message)
+      setImporting(false)
     }
-    e.target.value = ''
   }
 
   const arteColumns = [{ key:'numEscena', label:'Esc.', w:40 },{ key:'secuencia', label:'Secuencia', w:80 },{ key:'inF', label:'In', w:50 },{ key:'outF', label:'Out', w:50 },{ key:'frames', label:'Frames', w:60 },{ key:'timecode', label:'Timecode', w:100 },{ key:'personajes', label:'Personajes', w:130 },{ key:'desglosArte', label:'Desglose Arte', w:180 },{ key:'artista', label:'Artista', w:90 },{ key:'dias', label:'Días', w:50 },{ key:'estatus', label:'Estatus', w:100 },{ key:'comentarios', label:'Comentarios', w:180 }]
@@ -866,17 +913,39 @@ function TrackingPanel({ projectKey }) {
 function FilesPanel({ projectKey }) {
   const lsKeyF = `project_files_${projectKey}`
   const [files, setFiles] = useLS(lsKeyF, [])
-  const [uploading, setUploading] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState('') // '' | 'uploading' | filename
+
   const handleUpload = async e => {
-    setUploading(true)
-    for (const file of Array.from(e.target.files)) {
-      const uploaded = await uploadFile(file)
-      const record = uploaded
-        ? { id:Date.now()+Math.random(), name:file.name, type:file.type, size:file.size, url:uploaded.url, path:uploaded.path, comment:'', date:new Date().toLocaleDateString('es-MX') }
-        : await new Promise(res => { const r=new FileReader(); r.onload=ev=>res({ id:Date.now()+Math.random(), name:file.name, type:file.type, size:file.size, url:ev.target.result, comment:'', date:new Date().toLocaleDateString('es-MX') }); r.readAsDataURL(file) })
-      setFiles(f => { const n=[...f,record]; localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+    const fileList = Array.from(e.target.files)
+    e.target.value = ''
+    for (const file of fileList) {
+      setUploadStatus(`Subiendo: ${file.name}`)
+      try {
+        // Try Supabase first
+        const uploaded = await uploadFile(file)
+        if (uploaded) {
+          const record = { id:Date.now()+Math.random(), name:file.name, type:file.type||`image/${file.name.split('.').pop()}`, size:file.size, url:uploaded.url, path:uploaded.path, comment:'', date:new Date().toLocaleDateString('es-MX') }
+          setFiles(f => { const n=[...f,record]; localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+        } else {
+          // Supabase upload failed - show error for large files, fallback for small
+          if (file.size > 5*1024*1024) {
+            alert(`No se pudo subir ${file.name}. Verifica tu conexión e inténtalo de nuevo.`)
+            continue
+          }
+          const url = await new Promise((res,rej) => {
+            const r = new FileReader()
+            r.onload = ev => res(ev.target.result)
+            r.onerror = rej
+            r.readAsDataURL(file)
+          })
+          const record = { id:Date.now()+Math.random(), name:file.name, type:file.type||`image/${file.name.split('.').pop()}`, size:file.size, url, comment:'', date:new Date().toLocaleDateString('es-MX') }
+          setFiles(f => { const n=[...f,record]; localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
+        }
+      } catch(err) {
+        alert(`Error al subir ${file.name}: ${err.message}`)
+      }
     }
-    setUploading(false)
+    setUploadStatus('')
   }
   const updateComment = (id,comment) => setFiles(f=>{ const n=f.map(x=>x.id===id?{...x,comment}:x); localStorage.setItem(lsKeyF,JSON.stringify(n)); return n })
   const remove = async id => {
@@ -886,14 +955,24 @@ function FilesPanel({ projectKey }) {
   }
   return (
     <div>
-      <div style={{ border:'1.5px dashed var(--border2)', borderRadius:14, padding:30, textAlign:'center', background:'var(--bg2)', position:'relative', marginBottom:20, cursor: uploading?'wait':'pointer' }}>
-        <div style={{ fontSize:13, color:'var(--text2)', marginBottom:4 }}>{uploading ? 'Subiendo archivos...' : 'Arrastra archivos aquí o haz clic'}</div>
-        <div style={{ fontSize:12, color:'var(--text3)' }}>Video, imagen, audio — para revisión</div>
-        <input type="file" multiple accept="image/*,video/*,audio/*" onChange={handleUpload} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={uploading} />
+      <div style={{ border:`1.5px dashed ${uploadStatus?'var(--green)':'var(--border2)'}`, borderRadius:14, padding:30, textAlign:'center', background: uploadStatus?'var(--green-light)':'var(--bg2)', position:'relative', marginBottom:20, cursor: uploadStatus?'wait':'pointer', transition:'all 0.2s' }}>
+        <div style={{ fontSize:22, marginBottom:8 }}>🖼️</div>
+        <div style={{ fontSize:13, color:'var(--text2)', marginBottom:4 }}>
+          {uploadStatus ? uploadStatus : 'Arrastra archivos aquí o haz clic'}
+        </div>
+        <div style={{ fontSize:12, color:'var(--text3)' }}>
+          {uploadStatus ? '...' : 'Imágenes, video, audio · JPG, PNG, MP4, MP3, etc.'}
+        </div>
+        <input type="file" multiple accept="image/*,video/*,audio/*,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.mp3,.wav,.m4a" onChange={handleUpload} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={!!uploadStatus} />
       </div>
       {files.length===0&&<div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>Sin archivos aún</div>}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))', gap:12 }}>
-        {files.map(f=>{ const isImg=f.type?.startsWith('image/'), isVid=f.type?.startsWith('video/')
+        {files.map(f=>{
+          const ext = f.name?.split('.').pop()?.toLowerCase()
+          const imgExts = ['jpg','jpeg','png','gif','webp','bmp','svg']
+          const vidExts = ['mp4','mov','avi','webm','mkv']
+          const isImg = f.type?.startsWith('image/') || imgExts.includes(ext)
+          const isVid = f.type?.startsWith('video/') || vidExts.includes(ext)
           return <div key={f.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
             <div style={{ aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
               {isImg&&<img src={f.url} alt={f.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} />}
