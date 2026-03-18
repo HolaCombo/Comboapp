@@ -381,29 +381,57 @@ function StoryboardPanel({ projectKey }) {
   const { data: rawPanels, insert: insertPanel, update: updatePanelDB, remove: removePanelDB } = useSupabaseTable('storyboard_panels', `sb_${projectKey}`, [], 'panel_order')
   const panels = (Array.isArray(rawPanels)?rawPanels:[]).filter(p=>p.project_key===projectKey).sort((a,b)=>a.panel_order-b.panel_order)
   const [view, setView] = useState('cards')
-  const [importing, setImporting] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  // Local edits buffer - prevents losing text while typing
+  const [localEdits, setLocalEdits] = useState({})
+  const saveTimers = useRef({})
 
   const add = async () => {
     const order = panels.length
     await insertPanel({ project_key:projectKey, panel_order:order, img_url:'', img_path:'', descripcion:'', dialogo:'', comentarios:'', duracion:'', artista:'', estatus:'pendiente' })
   }
 
-  const remove = id => removePanelDB(id)
+  const remove = id => {
+    setLocalEdits(e => { const n={...e}; delete n[id]; return n })
+    removePanelDB(id)
+  }
+
+  // Get current value: local edit takes priority over DB value
+  const getVal = (p, key) => {
+    if (localEdits[p.id] && localEdits[p.id][key] !== undefined) return localEdits[p.id][key]
+    if (key==='img') return p.img_url||''
+    return p[key]||''
+  }
 
   const update = (id, key, val) => {
-    // Map local key names to DB column names
-    const dbKey = key==='desc'?'descripcion':key==='img'?'img_url':key
+    // Update local state immediately (no lag while typing)
+    setLocalEdits(e => ({ ...e, [id]: { ...(e[id]||{}), [key]: val } }))
+    // Debounce save to Supabase (wait 800ms after last keystroke)
+    if (saveTimers.current[`${id}_${key}`]) clearTimeout(saveTimers.current[`${id}_${key}`])
+    saveTimers.current[`${id}_${key}`] = setTimeout(() => {
+      const dbKey = key==='img'?'img_url':key
+      updatePanelDB(id, { [dbKey]: val })
+    }, 800)
+  }
+
+  const updateImmediate = (id, key, val) => {
+    setLocalEdits(e => ({ ...e, [id]: { ...(e[id]||{}), [key]: val } }))
+    const dbKey = key==='img'?'img_url':key
     updatePanelDB(id, { [dbKey]: val })
   }
 
   const loadImg = async (id, file) => {
     const uploaded = await uploadFile(file)
     if (uploaded) {
-      updatePanelDB(id, { img_url: uploaded.url, img_path: uploaded.path })
+      updateImmediate(id, 'img_url', uploaded.url)
+      updatePanelDB(id, { img_path: uploaded.path })
+      setLocalEdits(e => ({ ...e, [id]: { ...(e[id]||{}), img: uploaded.url } }))
     } else {
       const reader = new FileReader()
-      reader.onload = e => updatePanelDB(id, { img_url: e.target.result, img_path: '' })
+      reader.onload = e => {
+        updateImmediate(id, 'img_url', e.target.result)
+        setLocalEdits(prev => ({ ...prev, [id]: { ...(prev[id]||{}), img: e.target.result } }))
+      }
       reader.readAsDataURL(file)
     }
   }
@@ -441,12 +469,7 @@ function StoryboardPanel({ projectKey }) {
   const artistColor = name => { const idx=ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
   const downloadPDF = () => window.print()
 
-  // Normalize panel fields
-  const p2local = p => ({
-    ...p,
-    img: p.img_url||'',
-    desc: p.descripcion||'',
-  })
+  // getVal handles local vs DB values
 
   return (
     <div>
@@ -465,13 +488,12 @@ function StoryboardPanel({ projectKey }) {
       {view==='cards' ? (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))', gap:16 }}>
           {panels.map((p,i)=>{
-            const lp = p2local(p)
             return (
               <div key={p.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
                 <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                   <span>Panel {i+1}</span>
                   <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                    <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)}
+                    <select value={getVal(p,'estatus')||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)}
                       style={{ fontSize:10, border:'none', background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', cursor:'pointer', outline:'none', borderRadius:4, padding:'2px 4px', fontWeight:500 }}>
                       {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
                     </select>
@@ -479,29 +501,29 @@ function StoryboardPanel({ projectKey }) {
                   </div>
                 </div>
                 <div style={{ position:'relative', aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-                  {lp.img ? <img src={lp.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> :
+                  {getVal(p,'img') ? <img src={getVal(p,'img')} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> :
                     <div style={{ textAlign:'center', pointerEvents:'none' }}><div style={{ fontSize:22, color:'var(--text3)' }}>+</div><div style={{ fontSize:11, color:'var(--text3)' }}>Subir imagen</div></div>}
                   <input type="file" accept="image/*" className="no-print" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
                 </div>
                 <div style={{ padding:'8px 12px 4px' }}>
-                  <textarea value={lp.desc} onChange={e=>update(p.id,'descripcion',e.target.value)} placeholder="Descripción / Acción..."
+                  <textarea value={getVal(p,'descripcion')} onChange={e=>update(p.id,'descripcion',e.target.value)} placeholder="Descripción / Acción..."
                     rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, overflow:'hidden' }}
                     onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                 </div>
                 <div style={{ padding:'0 12px 4px' }}>
-                  <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} placeholder="Diálogo / Guión..."
+                  <textarea value={getVal(p,'dialogo')} onChange={e=>update(p.id,'dialogo',e.target.value)} placeholder="Diálogo / Guión..."
                     rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic', overflow:'hidden' }}
                     onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                 </div>
                 <div style={{ padding:'0 12px 4px' }}>
-                  <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} placeholder="Comentarios..."
+                  <textarea value={getVal(p,'comentarios')} onChange={e=>update(p.id,'comentarios',e.target.value)} placeholder="Comentarios..."
                     rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px', overflow:'hidden' }}
                     onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                 </div>
                 <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
-                  <input value={p.duracion||''} onChange={e=>update(p.id,'duracion',e.target.value)} placeholder="Dur: 3s"
+                  <input value={getVal(p,'duracion')} onChange={e=>update(p.id,'duracion',e.target.value)} placeholder="Dur: 3s"
                     style={{ ...TDI, fontSize:11, color:'var(--text3)', width:70 }} />
-                  <input value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)} placeholder="Artista"
+                  <input value={getVal(p,'artista')} onChange={e=>update(p.id,'artista',e.target.value)} placeholder="Artista"
                     style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', flex:1 }} />
                 </div>
               </div>
@@ -528,12 +550,12 @@ function StoryboardPanel({ projectKey }) {
                     <td style={{ ...TD, width:30, textAlign:'center', fontWeight:500, color:'var(--text3)' }}>{i+1}</td>
                     <td style={{ ...TD, width:120 }}>
                       <div style={{ position:'relative', width:100, height:56, background:'var(--bg3)', borderRadius:6, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                        {lp.img ? <img src={lp.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <span style={{ fontSize:10, color:'var(--text3)' }}>Sin imagen</span>}
+                        {getVal(p,'img') ? <img src={getVal(p,'img')} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <span style={{ fontSize:10, color:'var(--text3)' }}>Sin imagen</span>}
                         <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
                       </div>
                     </td>
                     <td style={{ ...TD, width:200 }}>
-                      <textarea value={lp.desc} onChange={e=>update(p.id,'descripcion',e.target.value)} rows={2}
+                      <textarea value={getVal(p,'descripcion')} onChange={e=>update(p.id,'descripcion',e.target.value)} rows={1}
                         style={{ ...TDI, resize:'none', lineHeight:1.4, overflow:'hidden' }}
                         onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
                     </td>
