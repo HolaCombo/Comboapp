@@ -378,98 +378,93 @@ function BreakdownPanel({ projectKey }) {
 }
 
 function StoryboardPanel({ projectKey }) {
-  const { data: rawPanels, insert: insertPanel, update: updatePanelDB, remove: removePanelDB } = useSupabaseTable('storyboard_panels', `sb_${projectKey}`, [], 'panel_order')
-  const panels = (Array.isArray(rawPanels)?rawPanels:[]).filter(p=>p.project_key===projectKey).sort((a,b)=>a.panel_order-b.panel_order)
+  // Use local state ONLY - sync to Supabase manually on blur/change
+  const { data: dbPanels, insert: insertPanel, update: updatePanelDB, remove: removePanelDB } = useSupabaseTable('storyboard_panels', `sb_${projectKey}`, [], 'panel_order')
+  const [panels, setPanels] = useState([])
   const [view, setView] = useState('cards')
   const [syncing, setSyncing] = useState(false)
-  // Local edits buffer - prevents losing text while typing
-  const [localEdits, setLocalEdits] = useState({})
-  const saveTimers = useRef({})
+  const [initialized, setInitialized] = useState(false)
+
+  // Initialize local state from DB once
+  useEffect(() => {
+    const filtered = (Array.isArray(dbPanels)?dbPanels:[])
+      .filter(p=>p.project_key===projectKey)
+      .sort((a,b)=>a.panel_order-b.panel_order)
+    if (filtered.length > 0 && !initialized) {
+      setPanels(filtered.map(p=>({...p, img: p.img_url||'', desc: p.descripcion||''})))
+      setInitialized(true)
+    } else if (filtered.length > 0) {
+      // Merge: update only panels that aren't being edited
+      setPanels(prev => {
+        if (prev.length === 0) return filtered.map(p=>({...p, img:p.img_url||'', desc:p.descripcion||''}))
+        return filtered.map(p => {
+          const local = prev.find(x=>x.id===p.id)
+          return local ? local : {...p, img:p.img_url||'', desc:p.descripcion||''}
+        })
+      })
+    }
+  }, [dbPanels, projectKey])
 
   const add = async () => {
     const order = panels.length
-    await insertPanel({ project_key:projectKey, panel_order:order, img_url:'', img_path:'', descripcion:'', dialogo:'', comentarios:'', duracion:'', artista:'', estatus:'pendiente' })
+    const newPanel = await insertPanel({ project_key:projectKey, panel_order:order, img_url:'', img_path:'', descripcion:'', dialogo:'', comentarios:'', duracion:'', artista:'', estatus:'pendiente' })
+    if (newPanel) {
+      setPanels(prev => [...prev, {...newPanel, img:'', desc:''}])
+    }
   }
 
   const remove = id => {
-    setLocalEdits(e => { const n={...e}; delete n[id]; return n })
+    setPanels(prev => prev.filter(x=>x.id!==id))
     removePanelDB(id)
   }
 
-  // Get current value: local edit takes priority over DB value
-  const getVal = (p, key) => {
-    if (localEdits[p.id] && localEdits[p.id][key] !== undefined) return localEdits[p.id][key]
-    if (key==='img') return p.img_url||''
-    return p[key]||''
+  // Update local immediately, save to DB on blur
+  const updateLocal = (id, key, val) => {
+    setPanels(prev => prev.map(p=>p.id===id?{...p,[key]:val}:p))
   }
 
-  const update = (id, key, val) => {
-    // Update local state immediately (no lag while typing)
-    setLocalEdits(e => ({ ...e, [id]: { ...(e[id]||{}), [key]: val } }))
-    // Debounce save to Supabase (wait 800ms after last keystroke)
-    if (saveTimers.current[`${id}_${key}`]) clearTimeout(saveTimers.current[`${id}_${key}`])
-    saveTimers.current[`${id}_${key}`] = setTimeout(() => {
-      const dbKey = key==='img'?'img_url':key
-      updatePanelDB(id, { [dbKey]: val })
-    }, 800)
-  }
-
-  const updateImmediate = (id, key, val) => {
-    setLocalEdits(e => ({ ...e, [id]: { ...(e[id]||{}), [key]: val } }))
-    const dbKey = key==='img'?'img_url':key
+  const saveToDb = (id, key, val) => {
+    const dbKey = key==='img'?'img_url':key==='desc'?'descripcion':key
     updatePanelDB(id, { [dbKey]: val })
   }
 
   const loadImg = async (id, file) => {
-    const uploaded = await uploadFile(file)
-    if (uploaded) {
-      updateImmediate(id, 'img_url', uploaded.url)
-      updatePanelDB(id, { img_path: uploaded.path })
-      setLocalEdits(e => ({ ...e, [id]: { ...(e[id]||{}), img: uploaded.url } }))
-    } else {
-      const reader = new FileReader()
-      reader.onload = e => {
-        updateImmediate(id, 'img_url', e.target.result)
-        setLocalEdits(prev => ({ ...prev, [id]: { ...(prev[id]||{}), img: e.target.result } }))
+    // Show preview immediately
+    const reader = new FileReader()
+    reader.onload = async e => {
+      const localUrl = e.target.result
+      updateLocal(id, 'img', localUrl)
+      // Upload to Supabase in background
+      const uploaded = await uploadFile(file)
+      if (uploaded) {
+        updateLocal(id, 'img', uploaded.url)
+        updatePanelDB(id, { img_url: uploaded.url, img_path: uploaded.path })
+      } else {
+        updatePanelDB(id, { img_url: localUrl, img_path: '' })
       }
-      reader.readAsDataURL(file)
     }
-  }
-
-  // Sync storyboard panels to breakdown
-  const syncToBreakdown = async () => {
-    setSyncing(true)
-    try {
-      // Get existing breakdown rows
-      const lsKey = `breakdown_rows_${projectKey}`
-      const existing = JSON.parse(localStorage.getItem(lsKey)||'[]')
-      // Build new rows from panels
-      const newRows = panels.map((p,i) => ({
-        id: Date.now()+i,
-        numEscena: String(i+1),
-        imagen: p.img_url || '',
-        secuencia: '',
-        inF: 0, outF: 0, frames: 0, fps: 8, timecode: '',
-        personajes: '',
-        desglosArte: p.descripcion || '',
-        desglosAnim: p.dialogo || '',
-        layout: '', rough: '', clean: '', color: '', composite: '',
-        artista: p.artista || '',
-        animador: '',
-        dias: 0,
-        estatus: p.estatus || 'pendiente',
-        comentarios: p.comentarios || ''
-      }))
-      localStorage.setItem(lsKey, JSON.stringify(newRows))
-      alert(`✅ ${newRows.length} paneles sincronizados al Breakdown.`)
-    } catch(err) { alert('Error al sincronizar: '+err.message) }
-    setSyncing(false)
+    reader.readAsDataURL(file)
   }
 
   const artistColor = name => { const idx=ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
-  const downloadPDF = () => window.print()
 
-  // getVal handles local vs DB values
+  const syncToBreakdown = async () => {
+    setSyncing(true)
+    try {
+      const lsKey = `breakdown_rows_${projectKey}`
+      const newRows = panels.map((p,i) => ({
+        id: Date.now()+i, numEscena:String(i+1), imagen:p.img||'',
+        secuencia:'', inF:0, outF:0, frames:0, fps:8, timecode:'',
+        personajes:'', desglosArte:p.desc||p.descripcion||'',
+        desglosAnim:p.dialogo||'', layout:'', rough:'', clean:'', color:'', composite:'',
+        artista:p.artista||'', animador:'', dias:0,
+        estatus:p.estatus||'pendiente', comentarios:p.comentarios||''
+      }))
+      localStorage.setItem(lsKey, JSON.stringify(newRows))
+      alert(`✅ ${newRows.length} paneles sincronizados al Breakdown.`)
+    } catch(err) { alert('Error: '+err.message) }
+    setSyncing(false)
+  }
 
   return (
     <div>
@@ -479,112 +474,105 @@ function StoryboardPanel({ projectKey }) {
         ))}
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
           <button style={{ ...btnS, background:'var(--blue-light)', color:'var(--blue)', borderColor:'var(--blue)' }} onClick={syncToBreakdown} disabled={syncing}>
-            {syncing?'Sincronizando...':'⇄ Sincronizar al Breakdown'}
+            {syncing?'Sincronizando...':'⇄ Sync al Breakdown'}
           </button>
-          <button style={btnS} onClick={downloadPDF}>↓ PDF</button>
+          <button style={btnS} onClick={()=>window.print()}>↓ PDF</button>
         </div>
       </div>
 
       {view==='cards' ? (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))', gap:16 }}>
-          {panels.map((p,i)=>{
-            return (
-              <div key={p.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
-                <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span>Panel {i+1}</span>
-                  <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                    <select value={getVal(p,'estatus')||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)}
-                      style={{ fontSize:10, border:'none', background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', cursor:'pointer', outline:'none', borderRadius:4, padding:'2px 4px', fontWeight:500 }}>
-                      {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
-                    </select>
-                    <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>remove(p.id)}>✕</button>
-                  </div>
-                </div>
-                <div style={{ position:'relative', aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-                  {getVal(p,'img') ? <img src={getVal(p,'img')} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> :
-                    <div style={{ textAlign:'center', pointerEvents:'none' }}><div style={{ fontSize:22, color:'var(--text3)' }}>+</div><div style={{ fontSize:11, color:'var(--text3)' }}>Subir imagen</div></div>}
-                  <input type="file" accept="image/*" className="no-print" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
-                </div>
-                <div style={{ padding:'8px 12px 4px' }}>
-                  <textarea value={getVal(p,'descripcion')} onChange={e=>update(p.id,'descripcion',e.target.value)} placeholder="Descripción / Acción..."
-                    rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, overflow:'hidden' }}
-                    onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                </div>
-                <div style={{ padding:'0 12px 4px' }}>
-                  <textarea value={getVal(p,'dialogo')} onChange={e=>update(p.id,'dialogo',e.target.value)} placeholder="Diálogo / Guión..."
-                    rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic', overflow:'hidden' }}
-                    onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                </div>
-                <div style={{ padding:'0 12px 4px' }}>
-                  <textarea value={getVal(p,'comentarios')} onChange={e=>update(p.id,'comentarios',e.target.value)} placeholder="Comentarios..."
-                    rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px', overflow:'hidden' }}
-                    onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                </div>
-                <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
-                  <input value={getVal(p,'duracion')} onChange={e=>update(p.id,'duracion',e.target.value)} placeholder="Dur: 3s"
-                    style={{ ...TDI, fontSize:11, color:'var(--text3)', width:70 }} />
-                  <input value={getVal(p,'artista')} onChange={e=>update(p.id,'artista',e.target.value)} placeholder="Artista"
-                    style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', flex:1 }} />
+          {panels.map((p,i)=>(
+            <div key={p.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
+              <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <span>Panel {i+1}</span>
+                <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                  <select value={p.estatus||'pendiente'}
+                    onChange={e=>{updateLocal(p.id,'estatus',e.target.value);saveToDb(p.id,'estatus',e.target.value)}}
+                    style={{ fontSize:10, border:'none', background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', cursor:'pointer', outline:'none', borderRadius:4, padding:'2px 4px', fontWeight:500 }}>
+                    {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <button style={{ ...btnD, fontSize:10 }} className="no-print" onClick={()=>remove(p.id)}>✕</button>
                 </div>
               </div>
-            )
-          })}
+              <div style={{ position:'relative', aspectRatio:'16/9', background:'var(--bg3)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+                {p.img ? <img src={p.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> :
+                  <div style={{ textAlign:'center', pointerEvents:'none' }}><div style={{ fontSize:22, color:'var(--text3)' }}>+</div><div style={{ fontSize:11, color:'var(--text3)' }}>Subir imagen</div></div>}
+                <input type="file" accept="image/*" className="no-print" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+              </div>
+              <div style={{ padding:'8px 12px 4px' }}>
+                <textarea value={p.desc||''} placeholder="Descripción / Acción..."
+                  onChange={e=>updateLocal(p.id,'desc',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'desc',e.target.value)}
+                  rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:12, color:'var(--text2)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, overflow:'hidden' }}
+                  onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+              </div>
+              <div style={{ padding:'0 12px 4px' }}>
+                <textarea value={p.dialogo||''} placeholder="Diálogo / Guión..."
+                  onChange={e=>updateLocal(p.id,'dialogo',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'dialogo',e.target.value)}
+                  rows={1} style={{ width:'100%', border:'none', background:'transparent', resize:'none', fontSize:11, color:'var(--text3)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, fontStyle:'italic', overflow:'hidden' }}
+                  onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+              </div>
+              <div style={{ padding:'0 12px 4px' }}>
+                <textarea value={p.comentarios||''} placeholder="Comentarios..."
+                  onChange={e=>updateLocal(p.id,'comentarios',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'comentarios',e.target.value)}
+                  rows={1} style={{ width:'100%', border:'none', background:'var(--green-light)', resize:'none', fontSize:11, color:'var(--green-dark)', fontFamily:"'DM Sans',sans-serif", outline:'none', lineHeight:1.5, borderRadius:6, padding:'3px 6px', overflow:'hidden' }}
+                  onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+              </div>
+              <div style={{ padding:'6px 12px 10px', display:'flex', gap:8, alignItems:'center' }}>
+                <input value={p.duracion||''} placeholder="Dur: 3s"
+                  onChange={e=>updateLocal(p.id,'duracion',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'duracion',e.target.value)}
+                  style={{ ...TDI, fontSize:11, color:'var(--text3)', width:70 }} />
+                <input value={p.artista||''} placeholder="Artista"
+                  onChange={e=>updateLocal(p.id,'artista',e.target.value)}
+                  onBlur={e=>saveToDb(p.id,'artista',e.target.value)}
+                  style={{ ...TDI, fontSize:11, color:p.artista?artistColor(p.artista):'var(--text3)', flex:1 }} />
+              </div>
+            </div>
+          ))}
           <button onClick={add} className="no-print" style={{ border:'1.5px dashed var(--border2)', background:'transparent', borderRadius:14, aspectRatio:'16/9', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'var(--text3)', fontSize:12 }}>+ Nuevo panel</button>
         </div>
       ) : (
-        // Breakdown-Storyboard table view
         <div style={{ overflowX:'auto', border:'0.5px solid var(--border)', borderRadius:14 }}>
           <table style={{ borderCollapse:'collapse', fontSize:12, background:'var(--bg)', width:'100%' }}>
             <thead>
-              <tr>
-                {['#','Imagen','Descripción / Acción','Artista','Diálogo / Guión','Comentarios','Duración','Estatus'].map(h=>(
-                  <th key={h} style={TH}>{h}</th>
-                ))}
-              </tr>
+              <tr>{['#','Imagen','Descripción','Artista','Diálogo','Comentarios','Dur.','Estatus'].map(h=><th key={h} style={TH}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {panels.map((p,i)=>{
-                const lp = p2local(p)
-                return (
-                  <tr key={p.id}>
-                    <td style={{ ...TD, width:30, textAlign:'center', fontWeight:500, color:'var(--text3)' }}>{i+1}</td>
-                    <td style={{ ...TD, width:120 }}>
-                      <div style={{ position:'relative', width:100, height:56, background:'var(--bg3)', borderRadius:6, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                        {getVal(p,'img') ? <img src={getVal(p,'img')} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : <span style={{ fontSize:10, color:'var(--text3)' }}>Sin imagen</span>}
-                        <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
-                      </div>
-                    </td>
-                    <td style={{ ...TD, width:200 }}>
-                      <textarea value={getVal(p,'descripcion')} onChange={e=>update(p.id,'descripcion',e.target.value)} rows={1}
-                        style={{ ...TDI, resize:'none', lineHeight:1.4, overflow:'hidden' }}
-                        onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                    </td>
-                    <td style={{ ...TD, width:90 }}>
-                      <input value={p.artista||''} onChange={e=>update(p.id,'artista',e.target.value)}
-                        style={{ ...TDI, color:p.artista?artistColor(p.artista):'var(--text3)', fontWeight:500 }} placeholder="—" />
-                    </td>
-                    <td style={{ ...TD, width:180 }}>
-                      <textarea value={p.dialogo||''} onChange={e=>update(p.id,'dialogo',e.target.value)} rows={2}
-                        style={{ ...TDI, resize:'none', lineHeight:1.4, fontStyle:'italic', overflow:'hidden' }}
-                        onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                    </td>
-                    <td style={{ ...TD, width:160 }}>
-                      <textarea value={p.comentarios||''} onChange={e=>update(p.id,'comentarios',e.target.value)} rows={2}
-                        style={{ ...TDI, resize:'none', lineHeight:1.4, color:'var(--green-dark)', overflow:'hidden' }}
-                        onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
-                    </td>
-                    <td style={{ ...TD, width:70 }}>
-                      <input value={p.duracion||''} onChange={e=>update(p.id,'duracion',e.target.value)} style={{ ...TDI, width:60 }} placeholder="3s" />
-                    </td>
-                    <td style={{ ...TD, width:100 }}>
-                      <select value={p.estatus||'pendiente'} onChange={e=>update(p.id,'estatus',e.target.value)}
-                        style={{ ...TDI, background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>
-                        {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </td>
-                  </tr>
-                )
-              })}
+              {panels.map((p,i)=>(
+                <tr key={p.id}>
+                  <td style={{ ...TD, width:30, textAlign:'center', color:'var(--text3)', fontWeight:500 }}>{i+1}</td>
+                  <td style={{ ...TD, width:120 }}>
+                    <div style={{ position:'relative', width:100, height:56, background:'var(--bg3)', borderRadius:6, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      {p.img?<img src={p.img} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} />:<span style={{ fontSize:10, color:'var(--text3)' }}>Sin imagen</span>}
+                      <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&loadImg(p.id,e.target.files[0])} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+                    </div>
+                  </td>
+                  <td style={{ ...TD, width:200 }}>
+                    <textarea value={p.desc||''} onChange={e=>updateLocal(p.id,'desc',e.target.value)} onBlur={e=>saveToDb(p.id,'desc',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                  </td>
+                  <td style={{ ...TD, width:90 }}>
+                    <input value={p.artista||''} onChange={e=>updateLocal(p.id,'artista',e.target.value)} onBlur={e=>saveToDb(p.id,'artista',e.target.value)} style={{ ...TDI, color:p.artista?artistColor(p.artista):'var(--text3)' }} placeholder="—" />
+                  </td>
+                  <td style={{ ...TD, width:180 }}>
+                    <textarea value={p.dialogo||''} onChange={e=>updateLocal(p.id,'dialogo',e.target.value)} onBlur={e=>saveToDb(p.id,'dialogo',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, fontStyle:'italic', overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                  </td>
+                  <td style={{ ...TD, width:160 }}>
+                    <textarea value={p.comentarios||''} onChange={e=>updateLocal(p.id,'comentarios',e.target.value)} onBlur={e=>saveToDb(p.id,'comentarios',e.target.value)} rows={1} style={{ ...TDI, resize:'none', lineHeight:1.4, color:'var(--green-dark)', overflow:'hidden' }} onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+                  </td>
+                  <td style={{ ...TD, width:70 }}>
+                    <input value={p.duracion||''} onChange={e=>updateLocal(p.id,'duracion',e.target.value)} onBlur={e=>saveToDb(p.id,'duracion',e.target.value)} style={{ ...TDI, width:60 }} placeholder="3s" />
+                  </td>
+                  <td style={{ ...TD, width:100 }}>
+                    <select value={p.estatus||'pendiente'} onChange={e=>{updateLocal(p.id,'estatus',e.target.value);saveToDb(p.id,'estatus',e.target.value)}} style={{ ...TDI, background:STATUS_BG[p.estatus]||'var(--bg3)', color:'white', fontWeight:500, cursor:'pointer', borderRadius:6, padding:'3px 6px' }}>
+                      {['pendiente','revision','aprobado','rechazado'].map(s=><option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
