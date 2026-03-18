@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
 
 // Optimistic updates + Supabase realtime sync
@@ -80,53 +80,58 @@ export async function deleteFile(path, bucket = 'archivos') {
 // Stores entire data as JSON in one row per project_key
 export function useSupabaseDoc(table, projectKey, init) {
   const lsKey = `${table}_${projectKey}`
+  const colName = table === 'scripts' ? 'lines' : table === 'breakdowns' ? 'rows' : table === 'storyboards' ? 'panels' : 'data'
+  // Use ref for rowId so save() always has latest value
+  const rowIdRef = useRef(null)
+
   const [data, setDataLocal] = useState(() => {
     try { const s = localStorage.getItem(lsKey); return s ? JSON.parse(s) : init }
     catch { return init }
   })
-  const [rowId, setRowId] = useState(null)
 
   useEffect(() => {
     if (!supabase || !projectKey) return
+    // Fetch existing row
     supabase.from(table).select('*').eq('project_key', projectKey).limit(1)
       .then(({ data: rows }) => {
         if (rows && rows.length > 0) {
           const row = rows[0]
-          setRowId(row.id)
-          let parsed = row.lines || row.rows || row.panels || row.data || init
+          rowIdRef.current = row.id
+          let parsed = row[colName] || init
           if (Array.isArray(init) && !Array.isArray(parsed)) parsed = init
           setDataLocal(parsed)
           localStorage.setItem(lsKey, JSON.stringify(parsed))
         }
       })
-
-    const channel = supabase.channel(`doc_${table}_${projectKey}`)
+    // Realtime sync from other users
+    const channel = supabase.channel(`doc_${table}_${projectKey}_${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
         if (payload.new?.project_key === projectKey) {
-          const parsed = payload.new.lines || payload.new.rows || payload.new.panels || payload.new.data || init
+          rowIdRef.current = payload.new.id
+          let parsed = payload.new[colName] || init
+          if (Array.isArray(init) && !Array.isArray(parsed)) parsed = init
           setDataLocal(parsed)
           localStorage.setItem(lsKey, JSON.stringify(parsed))
-          setRowId(payload.new.id)
         }
       })
       .subscribe()
-
     return () => { supabase.removeChannel(channel) }
-  }, [table, projectKey])
+  }, [table, projectKey, colName])
 
-  const colName = table === 'scripts' ? 'lines' : table === 'breakdowns' ? 'rows' : table === 'storyboards' ? 'panels' : 'data'
-
-  const save = async (newData) => {
+  const save = useCallback(async (newData) => {
+    // Always update local immediately
     setDataLocal(newData)
     localStorage.setItem(lsKey, JSON.stringify(newData))
     if (!supabase) return
-    if (rowId) {
-      supabase.from(table).update({ [colName]: newData, updated_at: new Date().toISOString() }).eq('id', rowId)
+    if (rowIdRef.current) {
+      // Update existing row
+      await supabase.from(table).update({ [colName]: newData, updated_at: new Date().toISOString() }).eq('id', rowIdRef.current)
     } else {
+      // Insert new row
       const { data: inserted } = await supabase.from(table).insert([{ project_key: projectKey, [colName]: newData }]).select()
-      if (inserted?.[0]) setRowId(inserted[0].id)
+      if (inserted?.[0]) rowIdRef.current = inserted[0].id
     }
-  }
+  }, [table, projectKey, colName, lsKey])
 
   return [data, save]
 }
