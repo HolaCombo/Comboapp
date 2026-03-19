@@ -15,13 +15,38 @@ export function useSupabaseTable(table, localKey, init, orderCol = 'created_at')
 
   useEffect(() => {
     if (!supabase) return
+    // Initial load
     supabase.from(table).select('*').order(orderCol, { ascending: true })
       .then(({ data: rows }) => { if (rows) persist(rows) })
 
-    const channel = supabase.channel(`rt_${table}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
-        supabase.from(table).select('*').order(orderCol, { ascending: true })
-          .then(({ data: rows }) => { if (rows) persist(rows) })
+    // Realtime: merge changes instead of replacing everything
+    const channel = supabase.channel(`rt_${table}_${localKey}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table }, (payload) => {
+        setData(d => {
+          // Only add if not already present (avoid duplicate with optimistic)
+          if (d.find(x => x.id === payload.new.id)) {
+            const n = d.map(x => x.id === payload.new.id ? payload.new : x)
+            localStorage.setItem(localKey, JSON.stringify(n))
+            return n
+          }
+          const n = [...d.filter(x => typeof x.id !== 'number' || x.id > 1000000000000), payload.new]
+          localStorage.setItem(localKey, JSON.stringify(n))
+          return n
+        })
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table }, (payload) => {
+        setData(d => {
+          const n = d.map(x => x.id === payload.new.id ? { ...x, ...payload.new } : x)
+          localStorage.setItem(localKey, JSON.stringify(n))
+          return n
+        })
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table }, (payload) => {
+        setData(d => {
+          const n = d.filter(x => x.id !== payload.old.id)
+          localStorage.setItem(localKey, JSON.stringify(n))
+          return n
+        })
       })
       .subscribe()
 
