@@ -847,17 +847,7 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
           {/* Grid */}
           <div ref={gridRef} style={{ flex:1, overflowX:'auto' }}>
             <div style={{ minWidth:totalW, position:'relative' }}>
-              {/* Calendar event markers */}
-              {calEvents.filter(ev=>ev.event_date&&ev.event_name).map(ev=>{
-                const evDate = parseDate(ev.event_date)
-                if (evDate < minD || evDate > maxD) return null
-                const evL = zoom==='week'?(diffDays(minD,evDate)/7)*CELL:((evDate-minD)/(maxD-minD))*totalW
-                return (
-                  <div key={ev.id} style={{ position:'absolute', left:evL, top:36, bottom:0, width:1, background:ev.color||'#1D9E75', opacity:0.35, zIndex:1, pointerEvents:'none' }}>
-                    <div style={{ position:'absolute', top:2, left:3, fontSize:8, color:ev.color||'#1D9E75', whiteSpace:'nowrap', fontWeight:600, opacity:1 }}>{ev.event_name}</div>
-                  </div>
-                )
-              })}
+
               {/* Date header */}
               <div style={{ height:36, display:'flex', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)' }}>
                 {cols.map((col,i)=>(
@@ -913,13 +903,16 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
 
 function CalendarPanel({ projectKey }) {
   const { data: calRows, insert: insertEvent, update: updateEvent, remove: removeEvent } = useSupabaseTable('calendar_events', `cal_events_${projectKey}`, [], 'created_at')
-  const filteredCalRows = (Array.isArray(calRows) ? calRows : []).filter(r => r.project_key === projectKey)
-  const events = filteredCalRows.reduce((acc, r) => { acc[r.event_date] = { name: r.event_name, color: r.color||'#1D9E75', id: r.id }; return acc }, {})
+  const filteredCalRows = (Array.isArray(calRows)?calRows:[]).filter(r => r.project_key === projectKey)
+
   const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState(new Date().getMonth())
   const [adding, setAdding] = useState(null)
   const [newEvt, setNewEvt] = useState('')
   const [newColor, setNewColor] = useState('#1D9E75')
+  const [dragging, setDragging] = useState(null) // { id, eventName, color }
+  const [dragOver, setDragOver] = useState(null)
+
   const EVENT_COLORS = ['#1D9E75','#185FA5','#854F0B','#993556','#533AB7','#A32D2D','#3B6D11','#c48a30','#0F6E56','#1a6b8a']
   const MONTHS_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
   const pad = d => String(d).padStart(2,'0')
@@ -930,56 +923,101 @@ function CalendarPanel({ projectKey }) {
   const prevMonth = () => { if(month===0){setMonth(11);setYear(y=>y-1)}else setMonth(m=>m-1) }
   const nextMonth = () => { if(month===11){setMonth(0);setYear(y=>y+1)}else setMonth(m=>m+1) }
   const today = new Date()
+
+  // Group events by date - multiple per day
+  const eventsByDate = filteredCalRows.reduce((acc, r) => {
+    if (!acc[r.event_date]) acc[r.event_date] = []
+    acc[r.event_date].push(r)
+    return acc
+  }, {})
+
+  const saveEvent = async () => {
+    if (!newEvt.trim()) return
+    await insertEvent({ event_date: adding, event_name: newEvt.trim(), color: newColor, project_key: projectKey })
+    setNewEvt('')
+    setAdding(null)
+  }
+
+  // Drag and drop
+  const onDragStart = (ev, row) => {
+    setDragging(row)
+    ev.dataTransfer.effectAllowed = 'move'
+  }
+  const onDrop = async (targetDate) => {
+    if (!dragging || targetDate === dragging.event_date) { setDragging(null); setDragOver(null); return }
+    await updateEvent(dragging.id, { event_date: targetDate })
+    setDragging(null); setDragOver(null)
+  }
+
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
         <button style={btnS} onClick={prevMonth}>←</button>
-        <div style={{ fontSize:14, fontWeight:500, flex:1, textAlign:'center' }}>{MONTHS_FULL[month]} {year}</div>
+        <div style={{ fontSize:15, fontWeight:600, flex:1, textAlign:'center' }}>{MONTHS_FULL[month]} {year}</div>
         <button style={btnS} onClick={nextMonth}>→</button>
         <button style={{ ...btnS, fontSize:11 }} onClick={()=>{setMonth(today.getMonth());setYear(today.getFullYear())}}>Hoy</button>
         <button style={{ ...btnS, fontSize:11 }} onClick={()=>window.print()}>↓ PDF</button>
       </div>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4, marginBottom:6 }}>
-        {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=><div key={d} style={{ textAlign:'center', fontSize:11, color:'var(--text3)', padding:4 }}>{d}</div>)}
+
+      {/* Day headers */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4, marginBottom:4 }}>
+        {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>(
+          <div key={d} style={{ textAlign:'center', fontSize:11, color:'var(--text3)', padding:'4px 0', fontWeight:500 }}>{d}</div>
+        ))}
       </div>
+
+      {/* Calendar grid */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4 }}>
         {Array(offset).fill(null).map((_,i)=><div key={'e'+i}></div>)}
         {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>{
-          const key=keyFor(d); const evt=events[key]
-          const isToday = today.getDate()===d&&today.getMonth()===month&&today.getFullYear()===year
-          return <div key={d} onClick={()=>{setAdding(key);setNewEvt(evt?.name||'');setNewColor(evt?.color||'#1D9E75')}}
-            style={{ background:'var(--bg)', border:`0.5px solid ${isToday?'var(--green)':'var(--border)'}`, borderRadius:10, minHeight:70, padding:8, cursor:'pointer' }}>
-            <div style={{ fontSize:13, fontWeight:isToday?600:400, color:isToday?'var(--green)':'var(--text)' }}>{d}</div>
-            {evt&&<div style={{ fontSize:11, fontWeight:500, color:evt.color||'#1D9E75', marginTop:3, lineHeight:1.3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', borderBottom:`1.5px solid ${evt.color||'#1D9E75'}` }}>{evt.name}</div>}
-          </div>
+          const key = keyFor(d)
+          const dayEvents = eventsByDate[key] || []
+          const isToday = today.getDate()===d && today.getMonth()===month && today.getFullYear()===year
+          const isDragOver = dragOver === key
+          return (
+            <div key={d}
+              onDragOver={e=>{e.preventDefault();setDragOver(key)}}
+              onDragLeave={()=>setDragOver(null)}
+              onDrop={()=>onDrop(key)}
+              style={{ background: isDragOver?'var(--green-light)':isToday?'var(--bg3)':'var(--bg)', border:`0.5px solid ${isDragOver?'var(--green)':isToday?'var(--green)':'var(--border)'}`, borderRadius:10, minHeight:80, padding:'6px 6px 4px', cursor:'pointer', transition:'background 0.1s' }}>
+              {/* Day number */}
+              <div style={{ fontSize:13, fontWeight:isToday?600:400, color:isToday?'var(--green)':'var(--text)', marginBottom:4 }}>{d}</div>
+              {/* Events */}
+              <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                {dayEvents.map(ev=>(
+                  <div key={ev.id}
+                    draggable
+                    onDragStart={e=>onDragStart(e,ev)}
+                    onClick={e=>{e.stopPropagation()}}
+                    style={{ fontSize:10, fontWeight:500, color:ev.color||'#1D9E75', lineHeight:1.4, cursor:'grab', display:'flex', alignItems:'center', gap:4, justifyContent:'space-between' }}>
+                    <span style={{ flex:1, borderBottom:`1.5px solid ${ev.color||'#1D9E75'}`, paddingBottom:1 }}>{ev.event_name}</span>
+                    <button onClick={e=>{e.stopPropagation();removeEvent(ev.id)}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:9, color:'var(--text3)', padding:0, lineHeight:1, flexShrink:0 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+              {/* Add button on hover */}
+              <div onClick={()=>{setAdding(key);setNewEvt('');setNewColor('#1D9E75')}}
+                style={{ fontSize:10, color:'var(--text3)', marginTop:4, cursor:'pointer', opacity:0.5 }}>+ agregar</div>
+            </div>
+          )
         })}
       </div>
-      <Modal open={!!adding} onClose={()=>setAdding(null)} title={`Evento — ${adding}`}>
-        <input style={iStyle} value={newEvt} onChange={e=>setNewEvt(e.target.value)} placeholder="Nombre del evento..." autoFocus />
+
+      {/* Add event modal */}
+      <Modal open={!!adding} onClose={()=>setAdding(null)} title={`Agregar evento — ${adding}`}>
+        <input style={iStyle} value={newEvt} onChange={e=>setNewEvt(e.target.value)} placeholder="Nombre del evento..." autoFocus onKeyDown={e=>e.key==='Enter'&&saveEvent()} />
         <div style={{ marginTop:10, marginBottom:4 }}>
-          <div style={{ fontSize:11, color:'var(--text2)', marginBottom:6 }}>Color del evento</div>
+          <div style={{ fontSize:11, color:'var(--text2)', marginBottom:6 }}>Color</div>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             {EVENT_COLORS.map(c=>(
               <div key={c} onClick={()=>setNewColor(c)}
-                style={{ width:24, height:24, borderRadius:'50%', background:c, cursor:'pointer', border: newColor===c?'3px solid var(--text)':'3px solid transparent', transition:'transform 0.1s', transform:newColor===c?'scale(1.2)':'scale(1)' }} />
+                style={{ width:24, height:24, borderRadius:'50%', background:c, cursor:'pointer', border:newColor===c?'3px solid var(--text)':'3px solid transparent', transition:'transform 0.1s', transform:newColor===c?'scale(1.2)':'scale(1)' }} />
             ))}
           </div>
         </div>
         <div style={{ display:'flex', gap:8, marginTop:12, justifyContent:'flex-end' }}>
           <button style={btnS} onClick={()=>setAdding(null)}>Cancelar</button>
-          {events[adding]&&<button style={{ ...btnS, color:'var(--danger)' }} onClick={()=>{
-            const existing = filteredCalRows.find(r=>r.event_date===adding)
-            if(existing) removeEvent(existing.id)
-            setAdding(null)
-          }}>Eliminar</button>}
-          <button style={btnP} onClick={async ()=>{
-            if(newEvt.trim()) {
-              const existing = filteredCalRows.find(r=>r.event_date===adding)
-              if(existing) await removeEvent(existing.id)
-              await insertEvent({event_date:adding, event_name:newEvt.trim(), color:newColor, project_key:projectKey})
-            }
-            setAdding(null)
-          }}>Guardar</button>
+          <button style={btnP} onClick={saveEvent}>Agregar</button>
         </div>
       </Modal>
     </div>
