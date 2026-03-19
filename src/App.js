@@ -855,6 +855,8 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
   const [editingRow, setEditingRow] = useState(null)
+  const [hiddenCalEvents, setHiddenCalEvents] = useLS(`gantt_hidden_cal_${projectKey}`, [])
+  const toggleCalEvent = id => setHiddenCalEvents(h => h.includes(id) ? h.filter(x=>x!==id) : [...h, id])
   const [newRow, setNewRow] = useState({ task:'', start:'', end:'', assignee:'', status:'pending', project:projects[0]?.name||'', phase:'Producción' })
   const dragRef = useRef(null)
   const gridRef = useRef(null)
@@ -1055,12 +1057,19 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
             {calEvents.length>0&&(
               <React.Fragment>
                 <div style={{ padding:'6px 12px', background:'rgba(77,212,160,0.08)', borderBottom:'0.5px solid var(--border)', fontSize:10, fontWeight:600, color:'#4dd4a0', textTransform:'uppercase', letterSpacing:'0.5px' }}>📅 Fechas clave</div>
-                {calEvents.map(ev=>(
-                  <div key={ev.id} style={{ height:36, display:'flex', alignItems:'center', padding:'0 12px', borderBottom:'0.5px solid var(--border)', gap:8 }}>
-                    <div style={{ width:8, height:8, borderRadius:'50%', background:ev.color||'#1D9E75', flexShrink:0 }}></div>
-                    <div style={{ fontSize:11, color:'var(--text2)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{ev.event_name}</div>
-                  </div>
-                ))}
+                {calEvents.map(ev=>{
+                  const hidden = hiddenCalEvents.includes(ev.id)
+                  return (
+                    <div key={ev.id} style={{ height:36, display:'flex', alignItems:'center', padding:'0 8px 0 12px', borderBottom:'0.5px solid var(--border)', gap:8 }}>
+                      <div style={{ width:8, height:8, borderRadius:'50%', background:hidden?'var(--bg3)':ev.color||'#1D9E75', flexShrink:0, transition:'background 0.15s' }}></div>
+                      <div style={{ fontSize:11, color:hidden?'var(--text3)':'var(--text2)', flex:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', textDecoration:hidden?'line-through':'none' }}>{ev.event_name}</div>
+                      <button onClick={()=>toggleCalEvent(ev.id)}
+                        style={{ fontSize:9, padding:'2px 6px', borderRadius:10, border:'0.5px solid var(--border2)', background:hidden?'transparent':'rgba(77,212,160,0.15)', color:hidden?'var(--text3)':'#4dd4a0', cursor:'pointer' }}>
+                        {hidden?'Mostrar':'Ocultar'}
+                      </button>
+                    </div>
+                  )
+                })}
               </React.Fragment>
             )}
           </div>
@@ -1108,7 +1117,7 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
               {calEvents.length>0&&(
                 <React.Fragment>
                   <div style={{ height:26, background:'rgba(77,212,160,0.05)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
-                  {calEvents.filter(ev=>ev.event_date&&isValidDate(ev.event_date)).map(ev=>{
+                  {calEvents.filter(ev=>ev.event_date&&isValidDate(ev.event_date)&&!hiddenCalEvents.includes(ev.id)).map(ev=>{
                     const evDate = parseDate(ev.event_date)
                     const barL = zoom==='day'?diffDays(minD,evDate)*CELL:zoom==='week'?(diffDays(minD,evDate)/7)*CELL:((evDate-minD)/(maxD-minD))*totalW
                     return (
