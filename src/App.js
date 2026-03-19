@@ -170,6 +170,34 @@ function Dashboard({ projects, tasks, deleteProject, updateProject }) {
           <div style={{ fontSize:11, padding:'2px 8px', borderRadius:20, background:'var(--bg3)', color:'var(--text2)' }}>{t.assignee}</div>
         </div>
       ))}
+
+      {editingProj&&(
+        <Modal open={!!editingProj} onClose={()=>setEditingProj(null)} title="Editar proyecto">
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Nombre</label>
+              <input style={iStyle} value={editingProj.name||''} onChange={e=>setEditingProj(p=>({...p,name:e.target.value}))} placeholder="Nombre del proyecto" /></div>
+            <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Responsable / Director</label>
+              <input style={iStyle} value={editingProj.director||''} onChange={e=>setEditingProj(p=>({...p,director:e.target.value}))} placeholder="Nombre del responsable" /></div>
+            <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Duración</label>
+              <input style={iStyle} value={editingProj.duration||''} onChange={e=>setEditingProj(p=>({...p,duration:e.target.value}))} placeholder="ej: 12 semanas" /></div>
+            <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Color</label>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                {PROJECT_COLOR_PALETTE.map(c=>(
+                  <div key={c} onClick={()=>setEditingProj(p=>({...p,color:c}))}
+                    style={{ width:26, height:26, borderRadius:'50%', background:c, cursor:'pointer', border:editingProj.color===c?'3px solid white':'3px solid transparent', transition:'transform 0.1s', transform:editingProj.color===c?'scale(1.2)':'scale(1)' }} />
+                ))}
+              </div>
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8, marginTop:16, justifyContent:'flex-end' }}>
+            <button style={btnS} onClick={()=>setEditingProj(null)}>Cancelar</button>
+            <button style={btnP} onClick={()=>{
+              updateProject(editingProj.id, { name:editingProj.name, director:editingProj.director, duration:editingProj.duration, color:editingProj.color })
+              setEditingProj(null)
+            }}>Guardar</button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
