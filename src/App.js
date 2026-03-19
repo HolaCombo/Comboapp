@@ -513,9 +513,10 @@ function StoryboardPanel({ projectKey }) {
   const [syncing, setSyncing] = useState(false)
   const [initialized, setInitialized] = useState(false)
 
-  // Load from DB on mount and when projectKey changes
-  // We only sync FROM db when local panels is empty (page load/refresh)
-  // After that, local state is the source of truth until page reload
+  const savingImgsRef = useRef(new Set())
+  useEffect(() => { savingImgsRef.current = savingImgs }, [savingImgs])
+
+  // Load from DB — merge carefully to not overwrite local edits or uploading images
   useEffect(() => {
     if (!Array.isArray(dbPanels)) return
     const filtered = dbPanels
@@ -523,19 +524,75 @@ function StoryboardPanel({ projectKey }) {
       .sort((a,b)=>(a.panel_order||0)-(b.panel_order||0))
     setPanels(prev => {
       if (prev.length === 0) {
-        // Fresh load - take everything from DB
         return filtered.map(p=>({...p, img:p.img_url||'', desc:p.descripcion||''}))
       }
-      // Already have local data - only add panels that don't exist locally yet
       const existingIds = new Set(prev.map(x=>x.id))
       const newFromDb = filtered.filter(p=>!existingIds.has(p.id))
       if (newFromDb.length > 0) {
         return [...prev, ...newFromDb.map(p=>({...p,img:p.img_url||'',desc:p.descripcion||''}))]
       }
-      return prev
+      // Update existing panels from DB but preserve local img if currently uploading
+      return prev.map(localP => {
+        if (savingImgsRef.current.has(localP.id)) return localP // uploading — don't touch
+        const dbP = filtered.find(p=>p.id===localP.id)
+        if (!dbP) return localP
+        // Only update img from DB if local is still a data: URL (preview) and DB has real URL
+        const imgToUse = (localP.img.startsWith('data:') && dbP.img_url && !dbP.img_url.startsWith('data:')) ? dbP.img_url : localP.img
+        return { ...localP, img: imgToUse }
+      })
     })
     setInitialized(true)
   }, [dbPanels, projectKey])
+
+  const reorderPanels = async (fromId, toId) => {
+    if (fromId === toId) return
+    setPanels(prev => {
+      const arr = [...prev]
+      const fromIdx = arr.findIndex(p=>p.id===fromId)
+      const toIdx = arr.findIndex(p=>p.id===toId)
+      if (fromIdx<0||toIdx<0) return prev
+      const [moved] = arr.splice(fromIdx, 1)
+      arr.splice(toIdx, 0, moved)
+      // Save new order to DB
+      arr.forEach((p, i) => {
+        if (p.panel_order !== i) updatePanelDB(p.id, { panel_order: i })
+      })
+      return arr.map((p,i) => ({...p, panel_order: i}))
+    })
+  }
+
+  // Bulk upload multiple images at once
+  const handleBulkUpload = async (files) => {
+    const fileArr = Array.from(files).filter(f=>f.type.startsWith('image/')).sort((a,b)=>a.name.localeCompare(b.name))
+    if (!fileArr.length) return
+    setBulkUploading(true)
+    const startOrder = panels.length
+    for (let i=0; i<fileArr.length; i++) {
+      const file = fileArr[i]
+      setBulkProgress(`Subiendo ${i+1} de ${fileArr.length}: ${file.name}`)
+      const order = startOrder + i
+      // Insert new panel
+      const newPanel = await insertPanel({ project_key:projectKey, panel_order:order, img_url:'', img_path:'', descripcion:'', dialogo:'', comentarios:'', duracion:'', artista:'', estatus:'pendiente' })
+      if (newPanel) {
+        const tempId = newPanel.id
+        // Show local preview
+        const localUrl = await new Promise(res=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.readAsDataURL(file) })
+        setPanels(prev => {
+          const exists = prev.find(p=>p.id===tempId)
+          if (exists) return prev.map(p=>p.id===tempId?{...p,img:localUrl}:p)
+          return [...prev, {...newPanel, img:localUrl, desc:''}]
+        })
+        // Upload image
+        const uploaded = await uploadFile(file)
+        if (uploaded) {
+          updatePanelDB(tempId, { img_url:uploaded.url, img_path:uploaded.path })
+          setPanels(prev=>prev.map(p=>p.id===tempId?{...p,img:uploaded.url}:p))
+        }
+      }
+    }
+    setBulkUploading(false)
+    setBulkProgress('')
+  }
 
   const add = async () => {
     const order = panels.length
@@ -565,25 +622,84 @@ function StoryboardPanel({ projectKey }) {
     }
   }
 
+  const [savingImgs, setSavingImgs] = useState(new Set())
+  const [draggingPanel, setDraggingPanel] = useState(null)
+  const [dragOverPanel, setDragOverPanel] = useState(null)
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState({ done:0, total:0 })
+  const [dragPanel, setDragPanel] = useState(null)
+  const [dragOverPanel, setDragOverPanel] = useState(null)
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState('')
+
   const loadImg = async (id, file) => {
-    // Show preview immediately
-    const reader = new FileReader()
-    reader.onload = async e => {
-      const localUrl = e.target.result
-      updateLocal(id, 'img', localUrl)
-      // Upload to Supabase in background
+    setSavingImgs(s => new Set([...s, id]))
+    // Show preview immediately from local file
+    const localUrl = await new Promise(res => {
+      const r = new FileReader()
+      r.onload = e => res(e.target.result)
+      r.readAsDataURL(file)
+    })
+    updateLocal(id, 'img', localUrl)
+    // Upload to Supabase Storage
+    try {
       const uploaded = await uploadFile(file)
       if (uploaded) {
         updateLocal(id, 'img', uploaded.url)
-        updatePanelDB(id, { img_url: uploaded.url, img_path: uploaded.path })
+        await updatePanelDB(id, { img_url: uploaded.url, img_path: uploaded.path })
       } else {
-        updatePanelDB(id, { img_url: localUrl, img_path: '' })
+        await updatePanelDB(id, { img_url: localUrl, img_path: '' })
       }
+    } catch(e) {
+      console.error('loadImg error:', e)
     }
-    reader.readAsDataURL(file)
+    setSavingImgs(s => { const n=new Set(s); n.delete(id); return n })
   }
 
   const artistColor = name => { const idx=ALL_ARTISTS.indexOf(name); return ARTIST_COLORS[idx>=0?idx:0] }
+
+  // Reorder panels by drag
+  const onPanelDragStart = (e, id) => {
+    setDraggingPanel(id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const onPanelDrop = async (targetId) => {
+    if (!draggingPanel || draggingPanel === targetId) { setDraggingPanel(null); setDragOverPanel(null); return }
+    setPanels(prev => {
+      const fromIdx = prev.findIndex(p=>p.id===draggingPanel)
+      const toIdx = prev.findIndex(p=>p.id===targetId)
+      if (fromIdx<0||toIdx<0) return prev
+      const next = [...prev]
+      const [moved] = next.splice(fromIdx, 1)
+      next.splice(toIdx, 0, moved)
+      // Save new order to DB
+      next.forEach((p,i) => { if (p.panel_order !== i) updatePanelDB(p.id, { panel_order: i }) })
+      return next.map((p,i) => ({...p, panel_order:i}))
+    })
+    setDraggingPanel(null); setDragOverPanel(null)
+  }
+
+  // Bulk upload multiple images at once
+  const bulkUpload = async (files) => {
+    const fileArr = Array.from(files).filter(f=>f.type.startsWith('image/'))
+    if (!fileArr.length) return
+    setBulkUploading(true)
+    setBulkProgress({ done:0, total:fileArr.length })
+    for (let i=0; i<fileArr.length; i++) {
+      const file = fileArr[i]
+      // Create new panel
+      const order = panels.length + i
+      const newPanel = await insertPanel({ project_key:projectKey, panel_order:order, img_url:'', img_path:'', descripcion:'', dialogo:'', comentarios:'', duracion:'', artista:'', estatus:'pendiente' })
+      if (newPanel) {
+        setPanels(prev => [...prev, {...newPanel, img:'', desc:''}])
+        // Upload image
+        await loadImg(newPanel.id, file)
+      }
+      setBulkProgress({ done:i+1, total:fileArr.length })
+    }
+    setBulkUploading(false)
+    setBulkProgress({ done:0, total:0 })
+  }
 
   const syncToBreakdown = async () => {
     setSyncing(true)
@@ -609,18 +725,38 @@ function StoryboardPanel({ projectKey }) {
         {[['cards','Tarjetas'],['table','Breakdown-Storyboard']].map(([v,label])=>(
           <button key={v} style={{ padding:'6px 16px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:view===v?'var(--green)':'transparent', color:view===v?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setView(v)}>{label}</button>
         ))}
-        <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+        <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
+          {bulkUploading&&<span style={{ fontSize:11, color:'var(--green)' }}>{bulkProgress}</span>}
+          <div style={{ position:'relative' }}>
+            <button style={{ ...btnS, color:'var(--green)', borderColor:'var(--green)' }} disabled={bulkUploading}>
+              {bulkUploading?'Subiendo...':'↑ Subir múltiples imágenes'}
+            </button>
+            <input type="file" multiple accept="image/*" onChange={e=>handleBulkUpload(e.target.files)} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={bulkUploading} />
+          </div>
           <button style={{ ...btnS, background:'var(--blue-light)', color:'var(--blue)', borderColor:'var(--blue)' }} onClick={syncToBreakdown} disabled={syncing}>
             {syncing?'Sincronizando...':'⇄ Sync al Breakdown'}
           </button>
           <button style={btnS} onClick={()=>window.print()}>↓ PDF</button>
+          <div style={{ position:'relative' }}>
+            <button style={{ ...btnP, fontSize:11 }} disabled={bulkUploading}>
+              {bulkUploading?`Subiendo ${bulkProgress.done}/${bulkProgress.total}...`:'↑ Subir varias imágenes'}
+            </button>
+            <input type="file" multiple accept="image/*" onChange={e=>bulkUpload(e.target.files)} disabled={bulkUploading}
+              style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} />
+          </div>
         </div>
       </div>
 
       {view==='cards' ? (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))', gap:16 }}>
           {panels.map((p,i)=>(
-            <div key={p.id} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden' }}>
+            <div key={p.id}
+              draggable
+              onDragStart={()=>setDragPanel(p.id)}
+              onDragOver={e=>{e.preventDefault();setDragOverPanel(p.id)}}
+              onDragLeave={()=>setDragOverPanel(null)}
+              onDrop={()=>{reorderPanels(dragPanel,p.id);setDragPanel(null);setDragOverPanel(null)}}
+              style={{ background:'var(--bg)', border:`0.5px solid ${dragOverPanel===p.id?'var(--green)':'var(--border)'}`, borderRadius:14, overflow:'hidden', opacity:dragPanel===p.id?0.5:1, cursor:'grab', transition:'border-color 0.1s, opacity 0.1s' }}>
               <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <span>Panel {i+1}</span>
                 <div style={{ display:'flex', gap:6, alignItems:'center' }}>
