@@ -627,8 +627,6 @@ function StoryboardPanel({ projectKey }) {
   const [dragOverPanel, setDragOverPanel] = useState(null)
   const [bulkUploading, setBulkUploading] = useState(false)
   const [bulkProgress, setBulkProgress] = useState({ done:0, total:0 })
-  const [dragPanel, setDragPanel] = useState(null)
-  const [bulkProgress, setBulkProgress] = useState('')
 
   const loadImg = async (id, file) => {
     setSavingImgs(s => new Set([...s, id]))
@@ -724,13 +722,7 @@ function StoryboardPanel({ projectKey }) {
           <button key={v} style={{ padding:'6px 16px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:view===v?'var(--green)':'transparent', color:view===v?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setView(v)}>{label}</button>
         ))}
         <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
-          {bulkUploading&&<span style={{ fontSize:11, color:'var(--green)' }}>{bulkProgress}</span>}
-          <div style={{ position:'relative' }}>
-            <button style={{ ...btnS, color:'var(--green)', borderColor:'var(--green)' }} disabled={bulkUploading}>
-              {bulkUploading?'Subiendo...':'↑ Subir múltiples imágenes'}
-            </button>
-            <input type="file" multiple accept="image/*" onChange={e=>handleBulkUpload(e.target.files)} style={{ position:'absolute', inset:0, opacity:0, cursor:'pointer' }} disabled={bulkUploading} />
-          </div>
+
           <button style={{ ...btnS, background:'var(--blue-light)', color:'var(--blue)', borderColor:'var(--blue)' }} onClick={syncToBreakdown} disabled={syncing}>
             {syncing?'Sincronizando...':'⇄ Sync al Breakdown'}
           </button>
@@ -753,8 +745,8 @@ function StoryboardPanel({ projectKey }) {
               onDragStart={()=>setDragPanel(p.id)}
               onDragOver={e=>{e.preventDefault();setDragOverPanel(p.id)}}
               onDragLeave={()=>setDragOverPanel(null)}
-              onDrop={()=>{reorderPanels(dragPanel,p.id);setDragPanel(null);setDragOverPanel(null)}}
-              style={{ background:'var(--bg)', border:`0.5px solid ${dragOverPanel===p.id?'var(--green)':'var(--border)'}`, borderRadius:14, overflow:'hidden', opacity:dragPanel===p.id?0.5:1, cursor:'grab', transition:'border-color 0.1s, opacity 0.1s' }}>
+              onDrop={()=>onPanelDrop(p.id)}
+              style={{ background:'var(--bg)', border:`0.5px solid ${dragOverPanel===p.id?'var(--green)':'var(--border)'}`, borderRadius:14, overflow:'hidden', opacity:draggingPanel===p.id?0.4:1, cursor:'grab', transition:'border-color 0.1s, opacity 0.1s' }}>
               <div style={{ fontSize:10, color:'var(--text3)', padding:'8px 12px 4px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <span>Panel {i+1}</span>
                 <div style={{ display:'flex', gap:6, alignItems:'center' }}>
