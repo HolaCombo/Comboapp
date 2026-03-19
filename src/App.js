@@ -910,8 +910,9 @@ function CalendarPanel({ projectKey }) {
   const [adding, setAdding] = useState(null)
   const [newEvt, setNewEvt] = useState('')
   const [newColor, setNewColor] = useState('#1D9E75')
-  const [dragging, setDragging] = useState(null) // { id, eventName, color }
+  const [dragging, setDragging] = useState(null)
   const [dragOver, setDragOver] = useState(null)
+  const [editing, setEditing] = useState(null) // existing event being edited
 
   const EVENT_COLORS = ['#1D9E75','#185FA5','#854F0B','#993556','#533AB7','#A32D2D','#3B6D11','#c48a30','#0F6E56','#1a6b8a']
   const MONTHS_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
@@ -933,9 +934,16 @@ function CalendarPanel({ projectKey }) {
 
   const saveEvent = async () => {
     if (!newEvt.trim()) return
-    await insertEvent({ event_date: adding, event_name: newEvt.trim(), color: newColor, project_key: projectKey })
+    if (editing) {
+      // Edit existing event
+      await updateEvent(editing.id, { event_name: newEvt.trim(), color: newColor })
+      setEditing(null)
+    } else {
+      // Add new event
+      await insertEvent({ event_date: adding, event_name: newEvt.trim(), color: newColor, project_key: projectKey })
+      setAdding(null)
+    }
     setNewEvt('')
-    setAdding(null)
   }
 
   // Drag and drop
@@ -988,15 +996,15 @@ function CalendarPanel({ projectKey }) {
                   <div key={ev.id}
                     draggable
                     onDragStart={e=>onDragStart(e,ev)}
-                    onClick={e=>{e.stopPropagation()}}
-                    style={{ fontSize:10, fontWeight:500, color:ev.color||'#1D9E75', lineHeight:1.4, cursor:'grab', display:'flex', alignItems:'center', gap:4, justifyContent:'space-between' }}>
+                    onClick={e=>{e.stopPropagation();setEditing(ev);setNewEvt(ev.event_name);setNewColor(ev.color||'#1D9E75')}}
+                    style={{ fontSize:10, fontWeight:500, color:ev.color||'#1D9E75', lineHeight:1.4, cursor:'pointer', display:'flex', alignItems:'center', gap:4, justifyContent:'space-between' }}>
                     <span style={{ flex:1, borderBottom:`1.5px solid ${ev.color||'#1D9E75'}`, paddingBottom:1 }}>{ev.event_name}</span>
                     <button onClick={e=>{e.stopPropagation();removeEvent(ev.id)}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:9, color:'var(--text3)', padding:0, lineHeight:1, flexShrink:0 }}>✕</button>
                   </div>
                 ))}
               </div>
-              {/* Add button on hover */}
-              <div onClick={()=>{setAdding(key);setNewEvt('');setNewColor('#1D9E75')}}
+              {/* Add button */}
+              <div onClick={()=>{setAdding(key);setEditing(null);setNewEvt('');setNewColor('#1D9E75')}}
                 style={{ fontSize:10, color:'var(--text3)', marginTop:4, cursor:'pointer', opacity:0.5 }}>+ agregar</div>
             </div>
           )
@@ -1004,7 +1012,7 @@ function CalendarPanel({ projectKey }) {
       </div>
 
       {/* Add event modal */}
-      <Modal open={!!adding} onClose={()=>setAdding(null)} title={`Agregar evento — ${adding}`}>
+      <Modal open={!!adding||!!editing} onClose={()=>{setAdding(null);setEditing(null);setNewEvt('')}} title={editing?`Editar — ${editing.event_date}`:`Agregar — ${adding}`}>
         <input style={iStyle} value={newEvt} onChange={e=>setNewEvt(e.target.value)} placeholder="Nombre del evento..." autoFocus onKeyDown={e=>e.key==='Enter'&&saveEvent()} />
         <div style={{ marginTop:10, marginBottom:4 }}>
           <div style={{ fontSize:11, color:'var(--text2)', marginBottom:6 }}>Color</div>
@@ -1016,8 +1024,9 @@ function CalendarPanel({ projectKey }) {
           </div>
         </div>
         <div style={{ display:'flex', gap:8, marginTop:12, justifyContent:'flex-end' }}>
-          <button style={btnS} onClick={()=>setAdding(null)}>Cancelar</button>
-          <button style={btnP} onClick={saveEvent}>Agregar</button>
+          <button style={btnS} onClick={()=>{setAdding(null);setEditing(null);setNewEvt('')}}>Cancelar</button>
+          {editing&&<button style={{ ...btnS, color:'var(--danger)' }} onClick={()=>{removeEvent(editing.id);setEditing(null);setNewEvt('')}}>Eliminar</button>}
+          <button style={btnP} onClick={saveEvent}>{editing?'Guardar':'Agregar'}</button>
         </div>
       </Modal>
     </div>
