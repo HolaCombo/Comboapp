@@ -84,10 +84,23 @@ function LoginScreen({ onLogin }) {
 }
 
 
-function DashProjectMeta({ projectId }) {
-  const lsKey = `proj_meta_${projectId}`
-  const [meta, setMeta] = useLS(lsKey, { descripcion:'', entregables:'', specs:'' })
+function DashProjectMeta({ projectId, project, onUpdate }) {
+  const [local, setLocal] = useState({ descripcion: project?.descripcion||'', entregables: project?.entregables||'', specs: project?.specs||'' })
   const [open, setOpen] = useState(false)
+  const saveTimers = useRef({})
+
+  useEffect(() => {
+    setLocal({ descripcion: project?.descripcion||'', entregables: project?.entregables||'', specs: project?.specs||'' })
+  }, [project?.descripcion, project?.entregables, project?.specs])
+
+  const handleChange = (key, val) => {
+    setLocal(m=>({...m,[key]:val}))
+    if (saveTimers.current[key]) clearTimeout(saveTimers.current[key])
+    saveTimers.current[key] = setTimeout(() => {
+      onUpdate(projectId, { [key]: val })
+    }, 800)
+  }
+
   return (
     <div>
       <button onClick={()=>setOpen(o=>!o)} style={{ fontSize:10, color:'var(--text3)', background:'none', border:'none', cursor:'pointer', padding:0, marginBottom: open?8:0 }}>
@@ -97,19 +110,19 @@ function DashProjectMeta({ projectId }) {
         <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
           <div>
             <div style={{ fontSize:10, color:'var(--text3)', marginBottom:2 }}>Descripción</div>
-            <textarea value={meta.descripcion} onChange={e=>setMeta(m=>({...m,descripcion:e.target.value}))} placeholder="Descripción del proyecto..." rows={2}
+            <textarea value={local.descripcion} onChange={e=>handleChange('descripcion',e.target.value)} placeholder="Descripción del proyecto..." rows={2}
               style={{ ...iStyle, resize:'none', fontSize:11, lineHeight:1.4, overflow:'hidden' }}
               onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
           </div>
           <div>
             <div style={{ fontSize:10, color:'var(--text3)', marginBottom:2 }}>Entregables</div>
-            <textarea value={meta.entregables} onChange={e=>setMeta(m=>({...m,entregables:e.target.value}))} placeholder="Lista de entregables..." rows={2}
+            <textarea value={local.entregables} onChange={e=>handleChange('entregables',e.target.value)} placeholder="Lista de entregables..." rows={2}
               style={{ ...iStyle, resize:'none', fontSize:11, lineHeight:1.4, overflow:'hidden' }}
               onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
           </div>
           <div>
             <div style={{ fontSize:10, color:'var(--text3)', marginBottom:2 }}>Especificaciones técnicas</div>
-            <textarea value={meta.specs} onChange={e=>setMeta(m=>({...m,specs:e.target.value}))} placeholder="Resolución, fps, formato, codec..." rows={2}
+            <textarea value={local.specs} onChange={e=>handleChange('specs',e.target.value)} placeholder="Resolución, fps, formato, codec..." rows={2}
               style={{ ...iStyle, resize:'none', fontSize:11, lineHeight:1.4, overflow:'hidden' }}
               onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
           </div>
@@ -119,7 +132,8 @@ function DashProjectMeta({ projectId }) {
   )
 }
 
-function Dashboard({ projects, tasks, deleteProject }) {
+function Dashboard({ projects, tasks, deleteProject, updateProject }) {
+  const [editingProj, setEditingProj] = useState(null)
   const pending = tasks.filter(t=>!t.done).length
   return (
     <div>
@@ -138,10 +152,11 @@ function Dashboard({ projects, tasks, deleteProject }) {
             <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
               <div style={{ width:10, height:10, borderRadius:'50%', background:getProjectColor(p.name, projects), flexShrink:0 }}></div>
               <div style={{ fontSize:13, fontWeight:500, flex:1 }}>{p.name}</div>
+              <button onClick={e=>{e.stopPropagation();setEditingProj({...p})}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:'var(--text3)', padding:'2px 4px' }} title="Editar">✏️</button>
               <button onClick={e=>{e.stopPropagation();if(window.confirm('¿Eliminar proyecto '+p.name+'?'))deleteProject(p.id)}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:'var(--text3)', padding:'2px 4px' }}>✕</button>
             </div>
-            <div style={{ fontSize:11, color:'var(--text3)', marginBottom:8 }}>{p.director} · {p.duration}</div>
-            <DashProjectMeta projectId={p.id} />
+            <div style={{ fontSize:11, color:'var(--text3)', marginBottom:8 }}>{p.director||'—'} · {p.duration||'—'}</div>
+            <DashProjectMeta projectId={p.id} project={p} onUpdate={updateProject} />
             <div style={{ height:3, background:'rgba(255,255,255,0.08)', borderRadius:2, overflow:'hidden', marginTop:10 }}><div style={{ height:'100%', width:Math.max(p.progress||0,3)+'%', background:getProjectColor(p.name,projects), borderRadius:2, minWidth:20 }}></div></div>
             <div style={{ fontSize:11, color:'var(--text2)', marginTop:4 }}>{p.progress}% completado</div>
           </div>
@@ -680,25 +695,31 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
   const { data: rawRows, insert: insertRow, update: updateRowDB, remove: removeRowDB } = useSupabaseTable('gantt_tasks', `gantt_rows_${projectKey}`, [], 'created_at')
   const { data: calRowsAll } = useSupabaseTable('calendar_events', `cal_events_${calProjectKey}`, [], 'created_at')
   const calEvents = (Array.isArray(calRowsAll)?calRowsAll:[]).filter(r=>!r.project_key||r.project_key===projectKey)
-  const filteredRows = (Array.isArray(rawRows) ? rawRows : []).filter(r => !r.project_key || r.project_key === projectKey)
+  const filteredRows = (Array.isArray(rawRows)?rawRows:[]).filter(r=>!r.project_key||r.project_key===projectKey)
+
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
   const [editingRow, setEditingRow] = useState(null)
-  const [newRow, setNewRow] = useState({ task:'', start:'', end:'', assignee:'', status:'pending', project:projects[0]?.name||'' })
+  const [newRow, setNewRow] = useState({ task:'', start:'', end:'', assignee:'', status:'pending', project:projects[0]?.name||'', phase:'Producción' })
   const dragRef = useRef(null)
   const gridRef = useRef(null)
+
+  const PHASES = ['Preproducción','Producción','Postproducción']
 
   const parseDate = s => { if(!s) return new Date(); const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d) }
   const addDays = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r }
   const diffDays = (a,b) => Math.round((b-a)/86400000)
   const toDateStr = d => { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}` }
   const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-  const STATUS_OP = { done:1, active:1, pending:1, blocked:1 }
   const STATUS_COLORS_BAR = { done:'#1D9E75', active:'#185FA5', pending:'#c48a30', blocked:'#A32D2D' }
   const STATUS_PATTERNS = { done:'none', active:'none', pending:'repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(255,255,255,0.25) 5px, rgba(255,255,255,0.25) 7px)', blocked:'repeating-linear-gradient(90deg, transparent, transparent 5px, rgba(255,255,255,0.3) 5px, rgba(255,255,255,0.3) 7px)' }
-  const CELL = zoom==='week' ? 36 : 110
+  const CELL = zoom==='day' ? 28 : zoom==='week' ? 36 : 110
 
-  const addRow = async () => { if(!newRow.task||!newRow.start||!newRow.end) return; await insertRow({task:newRow.task, start_date:newRow.start, end_date:newRow.end, assignee:newRow.assignee, status:newRow.status, project_key:projectKey}); setShowForm(false) }
+  const addRow = async () => {
+    if(!newRow.task||!newRow.start||!newRow.end) return
+    await insertRow({ task:newRow.task, start_date:newRow.start, end_date:newRow.end, assignee:newRow.assignee, status:newRow.status, project_key:projectKey, phase:newRow.phase||'Producción' })
+    setShowForm(false)
+  }
   const remove = id => removeRowDB(id)
   const updateRow = (id, changes) => {
     const dbChanges = {}
@@ -707,10 +728,23 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
     if(changes.end!==undefined) dbChanges.end_date=changes.end
     if(changes.assignee!==undefined) dbChanges.assignee=changes.assignee
     if(changes.status!==undefined) dbChanges.status=changes.status
+    if(changes.phase!==undefined) dbChanges.phase=changes.phase
     if(Object.keys(dbChanges).length) updateRowDB(id, dbChanges)
   }
-  // Normalize: map start_date/end_date → start/end for display
-  const rows = filteredRows.map(r => ({...r, start: r.start_date||r.start||'', end: r.end_date||r.end||''}))
+
+  const rows = filteredRows.map(r=>({...r, start:r.start_date||r.start||'', end:r.end_date||r.end||'', phase:r.phase||'Producción'}))
+
+  // Move row up/down
+  const moveRow = async (id, dir) => {
+    const phase = rows.find(r=>r.id===id)?.phase||'Producción'
+    const phaseRows = rows.filter(r=>(r.phase||'Producción')===phase)
+    const idx = phaseRows.findIndex(r=>r.id===id)
+    const target = phaseRows[idx+dir]
+    if (!target) return
+    // Swap panel_order or created_at proxy - use a sort_order field
+    await updateRowDB(id, { sort_order: target.sort_order||target.id })
+    await updateRowDB(target.id, { sort_order: id })
+  }
 
   const isValidDate = s => s && s.match(/^\d{4}-\d{2}-\d{2}$/) && !isNaN(new Date(s))
   const validRows = rows.filter(r=>isValidDate(r.start)&&isValidDate(r.end))
@@ -718,78 +752,89 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
   let minD = allDates.length ? new Date(Math.min(...allDates)) : new Date()
   let maxD = allDates.length ? new Date(Math.max(...allDates)) : addDays(new Date(),60)
   minD = addDays(minD,-7); maxD = addDays(maxD,21)
-  const dow = minD.getDay(); minD = addDays(minD, dow===0?-6:1-dow)
+  if(zoom==='week'||zoom==='day'){const dow=minD.getDay();minD=addDays(minD,dow===0?-6:1-dow)}
 
   const cols = []
-  if(zoom==='week'){let d=new Date(minD);while(d<=maxD){cols.push(new Date(d));d=addDays(d,7)}}
+  if(zoom==='day'){let d=new Date(minD);while(d<=maxD){cols.push(new Date(d));d=addDays(d,1)}}
+  else if(zoom==='week'){let d=new Date(minD);while(d<=maxD){cols.push(new Date(d));d=addDays(d,7)}}
   else{let d=new Date(minD.getFullYear(),minD.getMonth(),1);while(d<=maxD){cols.push(new Date(d));d=new Date(d.getFullYear(),d.getMonth()+1,1)}}
   const totalW = cols.length*CELL
-  const allProjects = [...new Set(rows.map(r=>r.project||'General'))]
 
-  const pxToDate = (px) => {
-    if(zoom==='week') return addDays(minD, Math.round((px/CELL)*7))
-    return addDays(minD, Math.round((px/totalW)*diffDays(minD,maxD)))
-  }
-
-  // Drag to move bar
   const onBarMouseDown = (e, rowId, type) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const row = rows.find(r=>r.id===rowId)
-    if(!row) return
+    e.preventDefault(); e.stopPropagation()
+    const row = rows.find(r=>r.id===rowId); if(!row) return
     const startX = e.clientX
-    const origStart = parseDate(row.start)
-    const origEnd = parseDate(row.end)
-    const origDur = diffDays(origStart, origEnd)
-
-    dragRef.current = { rowId, type, startX, origStart, origEnd, origDur }
-
-    const onMove = (e) => {
+    const origStart = parseDate(row.start); const origEnd = parseDate(row.end)
+    dragRef.current = { rowId, type, startX, origStart, origEnd }
+    const onMove = e => {
       if(!dragRef.current) return
-      const dx = e.clientX - dragRef.current.startX
-      const daysDelta = zoom==='week' ? Math.round((dx/CELL)*7) : Math.round((dx/totalW)*diffDays(minD,maxD))
-      if(dragRef.current.type === 'move') {
-        const newStart = addDays(dragRef.current.origStart, daysDelta)
-        const newEnd = addDays(dragRef.current.origEnd, daysDelta)
-        updateRow(rowId, { start: toDateStr(newStart), end: toDateStr(newEnd) })
-      } else if(dragRef.current.type === 'resize') {
-        const newEnd = addDays(dragRef.current.origEnd, daysDelta)
-        if(diffDays(dragRef.current.origStart, newEnd) >= 1) {
-          updateRow(rowId, { end: toDateStr(newEnd) })
-        }
+      const dx = e.clientX-dragRef.current.startX
+      const daysDelta = zoom==='day'?Math.round(dx/CELL):zoom==='week'?Math.round((dx/CELL)*7):Math.round((dx/totalW)*diffDays(minD,maxD))
+      if(dragRef.current.type==='move'){
+        updateRow(rowId,{start:toDateStr(addDays(dragRef.current.origStart,daysDelta)),end:toDateStr(addDays(dragRef.current.origEnd,daysDelta))})
+      } else {
+        const newEnd=addDays(dragRef.current.origEnd,daysDelta)
+        if(diffDays(dragRef.current.origStart,newEnd)>=1) updateRow(rowId,{end:toDateStr(newEnd)})
       }
     }
-    const onUp = () => {
-      dragRef.current = null
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+    const onUp = () => { dragRef.current=null; window.removeEventListener('mousemove',onMove); window.removeEventListener('mouseup',onUp) }
+    window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp)
+  }
+
+  // Download as PNG
+  const download = () => {
+    const el = document.getElementById('gantt-area')
+    if (!el) return
+    const w = window.open('','_blank')
+    w.document.write(`<html><head><title>Gantt</title><style>
+      body{margin:0;background:#181818;color:#e8e8e2;font-family:DM Sans,sans-serif;}
+      table{border-collapse:collapse;font-size:11px;}
+      th,td{border:1px solid rgba(255,255,255,0.07);padding:4px 8px;}
+      th{background:#222;color:#aaa;}
+    </style></head><body>`)
+    w.document.write('<h3 style="color:#4dd4a0;padding:12px;margin:0">Timeline / Gantt</h3>')
+    w.document.write('<table><tr><th>Fase</th><th>Tarea</th><th>Responsable</th><th>Inicio</th><th>Fin</th><th>Estado</th></tr>')
+    rows.forEach(r => {
+      const estados = {done:'Listo',active:'En curso',pending:'Pendiente',blocked:'Bloqueado'}
+      w.document.write(`<tr><td>${r.phase||'Producción'}</td><td>${r.task}</td><td>${r.assignee||'-'}</td><td>${r.start}</td><td>${r.end}</td><td>${estados[r.status]||r.status}</td></tr>`)
+    })
+    w.document.write('</table></body></html>')
+    w.document.close(); w.print()
   }
 
   return (
-    <div>
-      <div style={{ display:'flex', gap:8, marginBottom:14, alignItems:'center' }}>
-        {[['week','Semana'],['month','Mes']].map(([z,label])=>(
+    <div id="gantt-area">
+      {/* Toolbar */}
+      <div style={{ display:'flex', gap:8, marginBottom:14, alignItems:'center', flexWrap:'wrap' }}>
+        {[['day','Días'],['week','Semanas'],['month','Meses']].map(([z,label])=>(
           <button key={z} style={{ padding:'5px 14px', fontSize:12, borderRadius:20, border:'0.5px solid var(--border2)', background:zoom===z?'var(--green)':'transparent', color:zoom===z?'white':'var(--text2)', cursor:'pointer' }} onClick={()=>setZoom(z)}>{label}</button>
         ))}
-        <div style={{ fontSize:11, color:'var(--text3)', marginLeft:4 }}>Arrastra las barras para mover · jala el borde derecho para redimensionar</div>
-        <button style={{ ...btnS, marginLeft:'auto' }} onClick={()=>setShowForm(v=>!v)}>+ Agregar tarea</button>
+        <div style={{ fontSize:11, color:'var(--text3)', marginLeft:4, flex:1 }}>Arrastra barras · jala borde derecho para redimensionar</div>
+        <button style={btnS} onClick={download}>↓ Descargar</button>
+        <button style={btnP} onClick={()=>setShowForm(v=>!v)}>+ Agregar tarea</button>
       </div>
 
+      {/* Add form */}
       {showForm&&(
         <div style={{ ...card, display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:16 }}>
           {[['task','Tarea'],['assignee','Responsable']].map(([k,l])=>(<div key={k}><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{l}</label><input style={iStyle} value={newRow[k]} onChange={e=>setNewRow(r=>({...r,[k]:e.target.value}))} /></div>))}
-          <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Proyecto</label><select style={iStyle} value={newRow.project} onChange={e=>setNewRow(r=>({...r,project:e.target.value}))}>{projects.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
+          <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Fase</label>
+            <select style={iStyle} value={newRow.phase} onChange={e=>setNewRow(r=>({...r,phase:e.target.value}))}>
+              {PHASES.map(p=><option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
           {[['start','Inicio'],['end','Fin']].map(([k,l])=>(<div key={k}><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{l}</label><input type="date" style={iStyle} value={newRow[k]} onChange={e=>setNewRow(r=>({...r,[k]:e.target.value}))} /></div>))}
-          <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Estado</label><select style={iStyle} value={newRow.status} onChange={e=>setNewRow(r=>({...r,status:e.target.value}))}>{Object.entries({pending:'Pendiente',active:'En curso',done:'Listo',blocked:'Bloqueado'}).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
+          <div><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Estado</label>
+            <select style={iStyle} value={newRow.status} onChange={e=>setNewRow(r=>({...r,status:e.target.value}))}>
+              {Object.entries({pending:'Pendiente',active:'En curso',done:'Listo',blocked:'Bloqueado'}).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
           <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}><button style={btnP} onClick={addRow}>Guardar</button><button style={btnS} onClick={()=>setShowForm(false)}>Cancelar</button></div>
         </div>
       )}
 
       {/* Edit modal */}
-      {editingRow && (
+      {editingRow&&(
         <Modal open={!!editingRow} onClose={()=>setEditingRow(null)} title="Editar tarea">
           {[['task','Tarea'],['assignee','Responsable']].map(([k,l])=>(
             <div key={k} style={{ marginBottom:8 }}>
@@ -797,12 +842,15 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
               <input style={iStyle} value={editingRow[k]||''} onChange={e=>setEditingRow(r=>({...r,[k]:e.target.value}))} />
             </div>
           ))}
+          <div style={{ marginBottom:8 }}>
+            <label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>Fase</label>
+            <select style={iStyle} value={editingRow.phase||'Producción'} onChange={e=>setEditingRow(r=>({...r,phase:e.target.value}))}>
+              {PHASES.map(p=><option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
             {[['start','Inicio'],['end','Fin']].map(([k,l])=>(
-              <div key={k}>
-                <label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{l}</label>
-                <input type="date" style={iStyle} value={editingRow[k]||''} onChange={e=>setEditingRow(r=>({...r,[k]:e.target.value}))} />
-              </div>
+              <div key={k}><label style={{ fontSize:11, color:'var(--text2)', display:'block', marginBottom:3 }}>{l}</label><input type="date" style={iStyle} value={editingRow[k]||''} onChange={e=>setEditingRow(r=>({...r,[k]:e.target.value}))} /></div>
             ))}
           </div>
           <div style={{ marginBottom:12 }}>
@@ -819,87 +867,122 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
         </Modal>
       )}
 
-      {validRows.length===0 ? (
-        <div style={{ padding:40, textAlign:'center', color:'var(--text3)', fontSize:13 }}>
-          Sin tareas aún. <button style={{ ...btnS, marginLeft:8 }} onClick={()=>setShowForm(true)}>+ Agregar tarea</button>
-        </div>
+      {validRows.length===0&&calEvents.length===0 ? (
+        <div style={{ padding:40, textAlign:'center', color:'var(--text3)', fontSize:13 }}>Sin tareas. <button style={{ ...btnS, marginLeft:8 }} onClick={()=>setShowForm(true)}>+ Agregar tarea</button></div>
       ) : (
         <div style={{ display:'flex', border:'0.5px solid var(--border)', borderRadius:14, overflow:'hidden', background:'var(--bg)' }}>
-          {/* Labels */}
-          <div style={{ width:200, minWidth:200, borderRight:'0.5px solid var(--border)', flexShrink:0 }}>
+          {/* Labels col */}
+          <div style={{ width:220, minWidth:220, borderRight:'0.5px solid var(--border)', flexShrink:0 }}>
             <div style={{ height:36, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)' }}></div>
-            {allProjects.map(proj=>(
-              <React.Fragment key={proj}>
-                <div style={{ padding:'5px 12px', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', fontSize:11, fontWeight:500, color:'var(--text2)' }}>{proj}</div>
-                {rows.filter(r=>(r.project||'General')===proj).map(r=>(
-                  <div key={r.id} style={{ height:44, display:'flex', alignItems:'center', padding:'0 12px', borderBottom:'0.5px solid var(--border)', gap:8, cursor:'pointer' }} onClick={()=>setEditingRow({...r})}>
-                    <div style={{ width:8, height:8, borderRadius:'50%', background:STATUS_COLORS_BAR[r.status]||getProjectColor(r.project, projects)||'#888', flexShrink:0 }}></div>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontSize:12, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.task}</div>
-                      <div style={{ fontSize:10, color:'var(--text3)' }}>{r.start} → {r.end}</div>
+            {PHASES.map(phase=>{
+              const phaseRows = rows.filter(r=>(r.phase||'Producción')===phase)
+              if(phaseRows.length===0) return null
+              return (
+                <React.Fragment key={phase}>
+                  <div style={{ padding:'6px 12px', background:'rgba(77,212,160,0.08)', borderBottom:'0.5px solid var(--border)', fontSize:10, fontWeight:600, color:'#4dd4a0', textTransform:'uppercase', letterSpacing:'0.5px' }}>{phase}</div>
+                  {phaseRows.map((r,ri)=>(
+                    <div key={r.id} style={{ height:44, display:'flex', alignItems:'center', padding:'0 8px 0 12px', borderBottom:'0.5px solid var(--border)', gap:6, cursor:'pointer' }} onClick={()=>setEditingRow({...r})}>
+                      <div style={{ width:8, height:8, borderRadius:'50%', background:STATUS_COLORS_BAR[r.status]||'#888', flexShrink:0 }}></div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:12, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.task}</div>
+                        <div style={{ fontSize:10, color:'var(--text3)' }}>{r.start} → {r.end}</div>
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
+                        <button onClick={e=>{e.stopPropagation();moveRow(r.id,-1)}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:9, color:'var(--text3)', padding:'1px 3px', lineHeight:1 }}>▲</button>
+                        <button onClick={e=>{e.stopPropagation();moveRow(r.id,1)}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:9, color:'var(--text3)', padding:'1px 3px', lineHeight:1 }}>▼</button>
+                      </div>
                     </div>
+                  ))}
+                </React.Fragment>
+              )
+            })}
+            {/* Calendar events label */}
+            {calEvents.length>0&&(
+              <React.Fragment>
+                <div style={{ padding:'6px 12px', background:'rgba(77,212,160,0.08)', borderBottom:'0.5px solid var(--border)', fontSize:10, fontWeight:600, color:'#4dd4a0', textTransform:'uppercase', letterSpacing:'0.5px' }}>📅 Fechas clave</div>
+                {calEvents.map(ev=>(
+                  <div key={ev.id} style={{ height:36, display:'flex', alignItems:'center', padding:'0 12px', borderBottom:'0.5px solid var(--border)', gap:8 }}>
+                    <div style={{ width:8, height:8, borderRadius:'50%', background:ev.color||'#1D9E75', flexShrink:0 }}></div>
+                    <div style={{ fontSize:11, color:'var(--text2)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{ev.event_name}</div>
                   </div>
                 ))}
               </React.Fragment>
-            ))}
+            )}
           </div>
 
           {/* Grid */}
           <div ref={gridRef} style={{ flex:1, overflowX:'auto' }}>
             <div style={{ minWidth:totalW, position:'relative' }}>
-
               {/* Date header */}
               <div style={{ height:36, display:'flex', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)' }}>
                 {cols.map((col,i)=>(
                   <div key={i} style={{ width:CELL, minWidth:CELL, display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:'var(--text3)', borderRight:'0.5px solid var(--border)' }}>
-                    {zoom==='week'?`${col.getDate()} ${MONTHS[col.getMonth()]}`:MONTHS[col.getMonth()]+' '+col.getFullYear()}
+                    {zoom==='day'?`${col.getDate()}`:zoom==='week'?`${col.getDate()} ${MONTHS[col.getMonth()]}`:MONTHS[col.getMonth()]+' '+col.getFullYear()}
                   </div>
                 ))}
               </div>
 
+              {/* Phase rows */}
+              {PHASES.map(phase=>{
+                const phaseRows = validRows.filter(r=>(r.phase||'Producción')===phase)
+                if(phaseRows.length===0) return null
+                return (
+                  <React.Fragment key={phase}>
+                    <div style={{ height:26, background:'rgba(77,212,160,0.05)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
+                    {phaseRows.map(r=>{
+                      const color = STATUS_COLORS_BAR[r.status]||'#1D9E75'
+                      const sD=parseDate(r.start), eD=parseDate(r.end)
+                      const barL = zoom==='day'?diffDays(minD,sD)*CELL:zoom==='week'?(diffDays(minD,sD)/7)*CELL:((sD-minD)/(maxD-minD))*totalW
+                      const barW = zoom==='day'?Math.max(CELL,diffDays(sD,eD)*CELL):zoom==='week'?Math.max(CELL,(diffDays(sD,eD)/7)*CELL):Math.max(24,((eD-sD)/(maxD-minD))*totalW)
+                      return (
+                        <div key={r.id} style={{ height:44, position:'relative', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}>
+                          {cols.map((_,i)=><div key={i} style={{ position:'absolute', left:i*CELL, top:0, bottom:0, width:CELL, borderRight:'0.5px solid var(--border)', opacity:0.1 }}></div>)}
+                          <div onMouseDown={e=>onBarMouseDown(e,r.id,'move')}
+                            style={{ position:'absolute', left:barL, top:10, height:24, width:barW, background:color, backgroundImage:STATUS_PATTERNS[r.status]||'none', borderRadius:6, display:'flex', alignItems:'center', padding:'0 8px', fontSize:10, fontWeight:500, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', zIndex:2, cursor:'grab', userSelect:'none' }}>
+                            {r.task}
+                            <div onMouseDown={e=>onBarMouseDown(e,r.id,'resize')} style={{ position:'absolute', right:0, top:0, bottom:0, width:8, cursor:'ew-resize', background:'rgba(255,255,255,0.3)', borderRadius:'0 6px 6px 0' }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </React.Fragment>
+                )
+              })}
 
-              {allProjects.map(proj=>(
-                <React.Fragment key={proj}>
-                  <div style={{ height:26, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
-                  {validRows.filter(r=>(r.project||'General')===proj).map(r=>{
-                    const color = STATUS_COLORS_BAR[r.status]||'#1D9E75'
-                    const op = 1
-                    const sD=parseDate(r.start), eD=parseDate(r.end)
-                    const barL = zoom==='week'?(diffDays(minD,sD)/7)*CELL:((sD-minD)/(maxD-minD))*totalW
-                    const barW = zoom==='week'?Math.max(CELL,(diffDays(sD,eD)/7)*CELL):Math.max(24,((eD-sD)/(maxD-minD))*totalW)
+              {/* Calendar events as bars */}
+              {calEvents.length>0&&(
+                <React.Fragment>
+                  <div style={{ height:26, background:'rgba(77,212,160,0.05)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
+                  {calEvents.filter(ev=>ev.event_date&&isValidDate(ev.event_date)).map(ev=>{
+                    const evDate = parseDate(ev.event_date)
+                    const barL = zoom==='day'?diffDays(minD,evDate)*CELL:zoom==='week'?(diffDays(minD,evDate)/7)*CELL:((evDate-minD)/(maxD-minD))*totalW
                     return (
-                      <div key={r.id} style={{ height:44, position:'relative', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}>
-                        {cols.map((_,i)=><div key={i} style={{ position:'absolute', left:i*CELL, top:0, bottom:0, width:CELL, borderRight:'0.5px solid var(--border)', opacity:0.15 }}></div>)}
-                        {/* Bar */}
-                        <div
-                          onMouseDown={e=>onBarMouseDown(e,r.id,'move')}
-                          style={{ position:'absolute', left:barL, top:10, height:24, width:barW, background:color, backgroundImage:STATUS_PATTERNS[r.status]||'none', opacity:op, borderRadius:6, display:'flex', alignItems:'center', padding:'0 8px', fontSize:10, fontWeight:500, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', zIndex:2, cursor:'grab', userSelect:'none' }}>
-                          {r.task}
-                          {/* Resize handle */}
-                          <div
-                            onMouseDown={e=>onBarMouseDown(e,r.id,'resize')}
-                            style={{ position:'absolute', right:0, top:0, bottom:0, width:8, cursor:'ew-resize', background:'rgba(255,255,255,0.3)', borderRadius:'0 6px 6px 0' }}
-                          />
+                      <div key={ev.id} style={{ height:36, position:'relative', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}>
+                        <div style={{ position:'absolute', left:Math.max(0,barL), top:6, height:24, width:Math.max(CELL,80), background:ev.color||'#1D9E75', borderRadius:6, display:'flex', alignItems:'center', padding:'0 8px', fontSize:10, fontWeight:500, color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', opacity:0.85 }}>
+                          {ev.event_name}
                         </div>
                       </div>
                     )
                   })}
                 </React.Fragment>
-              ))}
+              )}
             </div>
           </div>
         </div>
       )}
 
+      {/* Legend */}
       <div style={{ display:'flex', gap:12, marginTop:10, flexWrap:'wrap', alignItems:'center' }}>
-        {[...new Set(rows.map(r=>r.project||'General'))].map((proj,i)=>(<div key={proj} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:10, height:10, borderRadius:2, background:getProjectColor(proj,projects) }}></div>{proj}</div>))}
-        {[['Listo','done','#1D9E75'],['En curso','active','#185FA5'],['Pendiente','pending','#854F0B'],['Bloqueado','blocked','#A32D2D']].map(([l,k,c])=>(<div key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}><div style={{ width:24, height:10, borderRadius:2, background:c, backgroundImage:STATUS_PATTERNS[k]||'none', opacity:STATUS_OP[k]||0.5 }}></div>{l}</div>))}
-        <div style={{ fontSize:11, color:'var(--text3)', marginLeft:'auto' }}>Clic en una tarea para editar fechas</div>
+        {[['Listo','done','#1D9E75'],['En curso','active','#185FA5'],['Pendiente','pending','#c48a30'],['Bloqueado','blocked','#A32D2D']].map(([l,k,c])=>(
+          <div key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text2)' }}>
+            <div style={{ width:24, height:10, borderRadius:2, background:c, backgroundImage:STATUS_PATTERNS[k]||'none' }}></div>{l}
+          </div>
+        ))}
+        <div style={{ fontSize:11, color:'var(--text3)', marginLeft:'auto' }}>▲▼ reordenar · clic para editar</div>
       </div>
     </div>
   )
 }
-
 
 function CalendarPanel({ projectKey }) {
   const { data: calRows, insert: insertEvent, update: updateEvent, remove: removeEvent } = useSupabaseTable('calendar_events', `cal_events_${projectKey}`, [], 'created_at')
@@ -907,6 +990,9 @@ function CalendarPanel({ projectKey }) {
 
   const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState(new Date().getMonth())
+  const [multiView, setMultiView] = useState(false)
+  const [rangeStart, setRangeStart] = useLS(`cal_range_start_${projectKey}`, '')
+  const [rangeEnd, setRangeEnd] = useLS(`cal_range_end_${projectKey}`, '')
   const [adding, setAdding] = useState(null)
   const [newEvt, setNewEvt] = useState('')
   const [newColor, setNewColor] = useState('#1D9E75')
@@ -977,15 +1063,77 @@ function CalendarPanel({ projectKey }) {
 
   return (
     <div>
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
-        <button style={btnS} onClick={prevMonth}>←</button>
-        <div style={{ fontSize:15, fontWeight:600, flex:1, textAlign:'center' }}>{MONTHS_FULL[month]} {year}</div>
-        <button style={btnS} onClick={nextMonth}>→</button>
-        <button style={{ ...btnS, fontSize:11 }} onClick={()=>{setMonth(today.getMonth());setYear(today.getFullYear())}}>Hoy</button>
+      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, flexWrap:'wrap' }}>
+        {!multiView&&<button style={btnS} onClick={prevMonth}>←</button>}
+        {!multiView&&<div style={{ fontSize:15, fontWeight:600, flex:1, textAlign:'center' }}>{MONTHS_FULL[month]} {year}</div>}
+        {!multiView&&<button style={btnS} onClick={nextMonth}>→</button>}
+        {multiView&&<div style={{ fontSize:13, fontWeight:600, color:'var(--text2)' }}>Vista completa del proyecto</div>}
+        {multiView&&<div style={{ display:'flex', gap:6, alignItems:'center', flex:1 }}>
+          <span style={{ fontSize:11, color:'var(--text3)' }}>Desde</span>
+          <input type="month" style={{ ...iStyle, width:140, marginBottom:0 }} value={rangeStart} onChange={e=>setRangeStart(e.target.value)} />
+          <span style={{ fontSize:11, color:'var(--text3)' }}>Hasta</span>
+          <input type="month" style={{ ...iStyle, width:140, marginBottom:0 }} value={rangeEnd} onChange={e=>setRangeEnd(e.target.value)} />
+        </div>}
+        {!multiView&&<button style={{ ...btnS, fontSize:11 }} onClick={()=>{setMonth(today.getMonth());setYear(today.getFullYear())}}>Hoy</button>}
+        <button style={{ ...btnS, fontSize:11, background: multiView?'var(--green)':'transparent', color: multiView?'white':'var(--text2)' }} onClick={()=>setMultiView(v=>!v)}>
+          {multiView?'← Mes':'↕ Scroll completo'}
+        </button>
         <button style={{ ...btnS, fontSize:11 }} onClick={()=>window.print()}>↓ PDF</button>
         <button style={{ ...btnS, fontSize:11, color:'var(--blue)', borderColor:'var(--blue)' }} onClick={syncToGantt}>⇄ Sync al Gantt</button>
       </div>
 
+      {multiView && (() => {
+        // Generate months in range
+        const startDate = rangeStart ? new Date(rangeStart+'-01') : new Date(year, month, 1)
+        const endDate = rangeEnd ? new Date(rangeEnd+'-01') : new Date(year, month+3, 1)
+        const months = []
+        let cur = new Date(startDate)
+        while(cur <= endDate) { months.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1) }
+        return (
+          <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+            {months.map(mDate=>{
+              const y=mDate.getFullYear(), m=mDate.getMonth()
+              const fd=new Date(y,m,1).getDay(), off=fd===0?6:fd-1, dim=new Date(y,m+1,0).getDate()
+              const pad2=d=>String(d).padStart(2,'0')
+              return (
+                <div key={`${y}-${m}`}>
+                  <div style={{ fontSize:14, fontWeight:600, color:'var(--text)', marginBottom:8, paddingBottom:6, borderBottom:'0.5px solid var(--border)' }}>{MONTHS_FULL[m]} {y}</div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:3, marginBottom:3 }}>
+                    {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=><div key={d} style={{ textAlign:'center', fontSize:10, color:'var(--text3)', padding:'3px 0' }}>{d}</div>)}
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:3 }}>
+                    {Array(off).fill(null).map((_,i)=><div key={'e'+i}></div>)}
+                    {Array.from({length:dim},(_,i)=>i+1).map(d=>{
+                      const key=`${y}-${pad2(m+1)}-${pad2(d)}`
+                      const dayEvts=eventsByDate[key]||[]
+                      const isTodayD=today.getDate()===d&&today.getMonth()===m&&today.getFullYear()===y
+                      return (
+                        <div key={d} onDragOver={e=>{e.preventDefault();setDragOver(key)}} onDragLeave={()=>setDragOver(null)} onDrop={()=>onDrop(key)}
+                          style={{ background:dragOver===key?'var(--green-light)':isTodayD?'var(--bg3)':'var(--bg)', border:`0.5px solid ${isTodayD?'var(--green)':'var(--border)'}`, borderRadius:8, minHeight:64, padding:'5px 5px 3px', cursor:'pointer' }}>
+                          <div style={{ fontSize:12, fontWeight:isTodayD?600:400, color:isTodayD?'var(--green)':'var(--text)', marginBottom:3 }}>{d}</div>
+                          <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                            {dayEvts.map(ev=>(
+                              <div key={ev.id} draggable onDragStart={e=>onDragStart(e,ev)}
+                                onClick={e=>{e.stopPropagation();setEditing(ev);setNewEvt(ev.event_name);setNewColor(ev.color||'#1D9E75')}}
+                                style={{ fontSize:10, fontWeight:500, color:ev.color||'#1D9E75', cursor:'pointer', display:'flex', alignItems:'center', gap:3, justifyContent:'space-between' }}>
+                                <span style={{ flex:1, borderBottom:`1.5px solid ${ev.color||'#1D9E75'}`, paddingBottom:1 }}>{ev.event_name}</span>
+                                <button onClick={e=>{e.stopPropagation();removeEvent(ev.id)}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:8, color:'var(--text3)', padding:0 }}>✕</button>
+                              </div>
+                            ))}
+                          </div>
+                          <div onClick={()=>{setAdding(key);setEditing(null);setNewEvt('');setNewColor('#1D9E75')}} style={{ fontSize:9, color:'var(--text3)', marginTop:2, cursor:'pointer', opacity:0.5 }}>+ agregar</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
+
+      {!multiView && <>
       {/* Day headers */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4, marginBottom:4 }}>
         {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=>(
@@ -1030,6 +1178,7 @@ function CalendarPanel({ projectKey }) {
         })}
       </div>
 
+      </> }
       {/* Add event modal */}
       <Modal open={!!adding||!!editing} onClose={()=>{setAdding(null);setEditing(null);setNewEvt('')}} title={editing?`Editar — ${editing.event_date}`:`Agregar — ${adding}`}>
         <input style={iStyle} value={newEvt} onChange={e=>setNewEvt(e.target.value)} placeholder="Nombre del evento..." autoFocus onKeyDown={e=>e.key==='Enter'&&saveEvent()} />
@@ -1826,7 +1975,7 @@ export default function App() {
   const [theme, setTheme] = useTheme()
   const [user, setUser] = useState(null)
   const [active, setActive] = useState('dashboard')
-  const { data: projects, insert: insertProject, remove: deleteProject } = useSupabaseTable('projects', 'projects', seedProjects)
+  const { data: projects, insert: insertProject, remove: deleteProject, update: updateProject } = useSupabaseTable('projects', 'projects', seedProjects)
   const { data: tasks } = useSupabaseTable('tasks', 'tracking_tasks', seedTasks)
   const [currentProject, setCurrentProject] = useState(0)
   const [showModal, setShowModal] = useState(false)
@@ -1851,7 +2000,7 @@ export default function App() {
 
   const renderPanel = () => {
     switch(active) {
-      case 'dashboard': return <Dashboard projects={projects} tasks={tasks} deleteProject={deleteProject} />
+      case 'dashboard': return <Dashboard projects={projects} tasks={tasks} deleteProject={deleteProject} updateProject={updateProject} />
       case 'misemana': return <MiSemanaPanel user={user} />
       case 'script': return <ScriptPanel projectKey={projectKey} />
       case 'breakdown': return <BreakdownPanel projectKey={projectKey} />
