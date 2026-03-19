@@ -86,7 +86,15 @@ export function useSupabaseTable(table, localKey, init, orderCol = 'created_at')
     // Optimistic: remove immediately
     setData(d => { const n=d.filter(x=>x.id!==id); localStorage.setItem(localKey,JSON.stringify(n)); return n })
     if (!supabase) return
-    supabase.from(table).delete().eq('id', id)
+    const { error } = await supabase.from(table).delete().eq('id', id)
+    if (error) {
+      console.error(`Supabase delete error [${table}] id=${id}:`, error.message)
+      // Revert optimistic on error
+      supabase.from(table).select('*').order('created_at', { ascending: true })
+        .then(({ data: rows }) => { if (rows) { setData(rows); localStorage.setItem(localKey, JSON.stringify(rows)) } })
+    } else {
+      console.log(`Deleted [${table}] id=${id} OK`)
+    }
   }
 
   return { data, setData, insert, update, remove }
