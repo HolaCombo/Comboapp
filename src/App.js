@@ -142,7 +142,7 @@ function Dashboard({ projects, tasks, deleteProject }) {
             </div>
             <div style={{ fontSize:11, color:'var(--text3)', marginBottom:8 }}>{p.director} · {p.duration}</div>
             <DashProjectMeta projectId={p.id} />
-            <div style={{ height:4, background:'var(--bg3)', borderRadius:2, overflow:'hidden', marginTop:8 }}><div style={{ height:'100%', width:p.progress+'%', background:getProjectColor(p.name,projects), borderRadius:2 }}></div></div>
+            <div style={{ height:3, background:'rgba(255,255,255,0.08)', borderRadius:2, overflow:'hidden', marginTop:10 }}><div style={{ height:'100%', width:Math.max(p.progress||0,3)+'%', background:getProjectColor(p.name,projects), borderRadius:2, minWidth:20 }}></div></div>
             <div style={{ fontSize:11, color:'var(--text2)', marginTop:4 }}>{p.progress}% completado</div>
           </div>
         ))}
@@ -1786,7 +1786,7 @@ export default function App() {
     <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg2)' }}>
       <div style={{ width:220, minWidth:220, background:'var(--bg)', borderRight:'0.5px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden' }} className="no-print">
         <div style={{ padding:'16px 14px', borderBottom:'0.5px solid var(--border)' }}>
-          <img src="/logo.png" alt="ComboApp" style={{ height:44, maxWidth:180, objectFit:'contain', filter:'invert(1) brightness(2)' }} onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block'}} /><div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px', display:'none', color:'white' }}>¡HOLA! <span style={{ color:'#4dd4a0' }}>COMBO</span></div>
+          <img src="/logo.png" alt="ComboApp" style={{ height:48, maxWidth:190, objectFit:'contain', filter:'invert(1) brightness(2)' }} onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='flex'}} /><div style={{ display:'none', alignItems:'baseline', gap:4 }}><span style={{ fontSize:17, fontWeight:700, color:'white', letterSpacing:'-0.5px' }}>¡HOLA!</span><span style={{ fontSize:17, fontWeight:700, color:'#4dd4a0', letterSpacing:'-0.5px' }}>COMBO</span></div>
           <div style={{ marginTop:10 }}>
             <div style={{ fontSize:10, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:4 }}>Proyecto activo</div>
             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
