@@ -846,7 +846,18 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
 
           {/* Grid */}
           <div ref={gridRef} style={{ flex:1, overflowX:'auto' }}>
-            <div style={{ minWidth:totalW }}>
+            <div style={{ minWidth:totalW, position:'relative' }}>
+              {/* Calendar event markers */}
+              {calEvents.filter(ev=>ev.event_date&&ev.event_name).map(ev=>{
+                const evDate = parseDate(ev.event_date)
+                if (evDate < minD || evDate > maxD) return null
+                const evL = zoom==='week'?(diffDays(minD,evDate)/7)*CELL:((evDate-minD)/(maxD-minD))*totalW
+                return (
+                  <div key={ev.id} style={{ position:'absolute', left:evL, top:36, bottom:0, width:1, background:ev.color||'#1D9E75', opacity:0.35, zIndex:1, pointerEvents:'none' }}>
+                    <div style={{ position:'absolute', top:2, left:3, fontSize:8, color:ev.color||'#1D9E75', whiteSpace:'nowrap', fontWeight:600, opacity:1 }}>{ev.event_name}</div>
+                  </div>
+                )
+              })}
               {/* Date header */}
               <div style={{ height:36, display:'flex', background:'var(--bg3)', borderBottom:'0.5px solid var(--border)' }}>
                 {cols.map((col,i)=>(
@@ -856,18 +867,7 @@ function GanttPanel({ projects, projectKey, calProjectKey }) {
                 ))}
               </div>
 
-              {/* Calendar events as background markers */}
-              {calEvents.map(ev=>{
-                if (!ev.event_date || !ev.event_name) return null
-                const evDate = parseDate(ev.event_date)
-                if (evDate < minD || evDate > maxD) return null
-                const evL = zoom==='week'?(diffDays(minD,evDate)/7)*CELL:((evDate-minD)/(maxD-minD))*totalW
-                return (
-                  <div key={ev.id} style={{ position:'absolute', left:evL, top:0, bottom:0, width:2, background:ev.color||'#1D9E75', opacity:0.6, zIndex:1 }} title={`📅 ${ev.event_name}`}>
-                    <div style={{ position:'absolute', top:4, left:4, fontSize:9, color:ev.color||'#1D9E75', whiteSpace:'nowrap', fontWeight:500 }}>{ev.event_name}</div>
-                  </div>
-                )
-              })}
+
               {allProjects.map(proj=>(
                 <React.Fragment key={proj}>
                   <div style={{ height:26, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
@@ -948,9 +948,9 @@ function CalendarPanel({ projectKey }) {
           const key=keyFor(d); const evt=events[key]
           const isToday = today.getDate()===d&&today.getMonth()===month&&today.getFullYear()===year
           return <div key={d} onClick={()=>{setAdding(key);setNewEvt(evt?.name||'');setNewColor(evt?.color||'#1D9E75')}}
-            style={{ background:'var(--bg)', border:`0.5px solid ${isToday?'var(--green)':'var(--border)'}`, borderRadius:10, minHeight:52, padding:6, cursor:'pointer' }}>
-            <div style={{ fontSize:12, fontWeight:isToday?500:400, color:isToday?'var(--green)':'var(--text)' }}>{d}</div>
-            {evt&&<div style={{ fontSize:9, background:evt.color||'#1D9E75', color:'white', padding:'1px 4px', borderRadius:3, marginTop:2, lineHeight:1.4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{evt.name}</div>}
+            style={{ background:'var(--bg)', border:`0.5px solid ${isToday?'var(--green)':'var(--border)'}`, borderRadius:10, minHeight:70, padding:8, cursor:'pointer' }}>
+            <div style={{ fontSize:13, fontWeight:isToday?600:400, color:isToday?'var(--green)':'var(--text)' }}>{d}</div>
+            {evt&&<div style={{ fontSize:11, fontWeight:500, color:evt.color||'#1D9E75', marginTop:3, lineHeight:1.3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', borderBottom:`1.5px solid ${evt.color||'#1D9E75'}` }}>{evt.name}</div>}
           </div>
         })}
       </div>
@@ -1313,13 +1313,13 @@ function MiSemanaPanel({ user }) {
     <div style={{ display:'flex', gap:16, minHeight:400, alignItems:'flex-start' }}>
       {/* Sidebar de cortes */}
       <div style={{ width:200, minWidth:200, display:'flex', flexDirection:'column', gap:8 }}>
-        <button style={{ ...btnP, width:'100%' }} onClick={newCorte}>+ Nuevo corte</button>
+        <button style={{ ...btnP, width:'100%', fontSize:12 }} onClick={newCorte}>+ Nuevo corte</button>
         <div style={{ flex:1, display:'flex', flexDirection:'column', gap:6 }}>
           {cortes.map(c=>(
             <div key={c.id} onClick={()=>setCurrentCorte(c.id)}
-              style={{ background: currentCorte===c.id||(!currentCorte&&cortes[0]?.id===c.id)?'var(--green-light)':'var(--bg)', border:`0.5px solid ${currentCorte===c.id?'var(--green)':'var(--border)'}`, borderRadius:10, padding:'10px 12px', cursor:'pointer' }}>
-              <div style={{ fontSize:12, fontWeight:500, color: currentCorte===c.id?'var(--green-dark)':'var(--text)' }}>{c.fecha}</div>
-              <div style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>{c.proyectos?.length||0} proyectos</div>
+              style={{ background: currentCorte===c.id||(!currentCorte&&cortes[0]?.id===c.id)?'rgba(77,212,160,0.08)':'transparent', borderLeft:`2px solid ${currentCorte===c.id?'#4dd4a0':'transparent'}`, borderRadius:8, padding:'9px 12px', cursor:'pointer', transition:'all 0.15s' }}>
+              <div style={{ fontSize:11, fontWeight:600, color: currentCorte===c.id?'#4dd4a0':'var(--text2)', letterSpacing:'-0.2px' }}>{c.fecha}</div>
+              <div style={{ fontSize:10, color:'var(--text3)', marginTop:2 }}>{c.proyectos?.length||0} proyectos</div>
             </div>
           ))}
           {cortes.length===0 && <div style={{ fontSize:12, color:'var(--text3)', textAlign:'center', padding:20 }}>Sin cortes aún</div>}
@@ -1392,33 +1392,54 @@ function CorteEditor({ corte, onSave, onCancel }) {
 }
 
 function CorteView({ corte, onEdit, onDelete }) {
+  const SEM_COLORS = { rojo:'#ef5350', amarillo:'#EF9F27', verde:'#4dd4a0' }
+  const SEM_LABELS = { rojo:'Urgente', amarillo:'En proceso', verde:'Listo' }
   return (
     <div>
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20 }}>
-        <div style={{ fontSize:15, fontWeight:500, flex:1 }}>Corte — {corte.fecha}</div>
+      {/* Header */}
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20, paddingBottom:16, borderBottom:'0.5px solid var(--border)' }}>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:10, color:'var(--green)', textTransform:'uppercase', letterSpacing:'1px', fontWeight:600, marginBottom:3 }}>Corte semanal</div>
+          <div style={{ fontSize:16, fontWeight:600, color:'var(--text)' }}>{corte.fecha}</div>
+        </div>
+        <div style={{ fontSize:11, color:'var(--text3)', background:'var(--bg3)', padding:'3px 10px', borderRadius:20 }}>{(corte.proyectos||[]).length} proyectos</div>
         <button style={btnS} onClick={onEdit}>Editar</button>
         <button style={{ ...btnS, color:'var(--danger)', borderColor:'var(--danger)' }} onClick={onDelete}>Eliminar</button>
       </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-        {(corte.proyectos||[]).map(proj=>{
-          const sem = SEMAFORO.find(s=>s.value===proj.semaforo)
+
+      {/* Proyectos */}
+      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        {(corte.proyectos||[]).map((proj,pi)=>{
+          const semColor = SEM_COLORS[proj.semaforo]||'#888'
+          const semLabel = SEM_LABELS[proj.semaforo]||proj.semaforo
           return (
-            <div key={proj.id} style={{ ...card, borderLeft:`3px solid ${sem?.color||'#888'}`, marginBottom:0 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-                <span style={{ fontSize:16 }}>{sem?.label.split(' ')[0]}</span>
-                <span style={{ fontSize:14, fontWeight:500 }}>{proj.nombre}</span>
+            <div key={proj.id} style={{ background:'var(--bg)', borderRadius:'0 10px 10px 0', borderLeft:`3px solid ${semColor}`, overflow:'hidden' }}>
+              {/* Project header */}
+              <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px 8px' }}>
+                <div style={{ width:8, height:8, borderRadius:'50%', background:semColor, flexShrink:0 }}></div>
+                <div style={{ fontSize:13, fontWeight:600, color:'var(--text)', flex:1 }}>{proj.nombre}</div>
+                <span style={{ fontSize:10, fontWeight:500, padding:'2px 8px', borderRadius:20, background:semColor+'22', color:semColor }}>
+                  {semLabel}
+                </span>
               </div>
-              {(proj.tareas||[]).map(t=>(
-                <div key={t.id} style={{ display:'flex', gap:8, alignItems:'baseline', padding:'3px 0' }}>
-                  <div style={{ width:5, height:5, borderRadius:'50%', background:'var(--text3)', flexShrink:0, marginTop:6 }}></div>
-                  <span style={{ fontSize:13, flex:1, color:'var(--text)' }}>{t.texto}</span>
-                  {t.responsable&&<span style={{ fontSize:11, color:'var(--green-dark)', background:'var(--green-light)', padding:'1px 7px', borderRadius:20 }}>{t.responsable}</span>}
+              {/* Tasks */}
+              {(proj.tareas||[]).length > 0 && (
+                <div style={{ padding:'0 14px 10px', borderTop:'0.5px solid var(--border)' }}>
+                  {(proj.tareas||[]).map(t=>(
+                    <div key={t.id} style={{ display:'flex', gap:8, alignItems:'baseline', padding:'4px 0' }}>
+                      <div style={{ width:3, height:3, borderRadius:'50%', background:'var(--text3)', flexShrink:0, marginTop:7 }}></div>
+                      <span style={{ fontSize:12, flex:1, color:'var(--text2)', lineHeight:1.5 }}>{t.texto}</span>
+                      {t.responsable&&<span style={{ fontSize:10, color:semColor, background:semColor+'15', padding:'1px 7px', borderRadius:20, flexShrink:0 }}>{t.responsable}</span>}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )
         })}
-        {(!corte.proyectos||corte.proyectos.length===0)&&<div style={{ fontSize:13, color:'var(--text3)', textAlign:'center', padding:40 }}>Sin proyectos en este corte</div>}
+        {(!corte.proyectos||corte.proyectos.length===0)&&(
+          <div style={{ fontSize:13, color:'var(--text3)', textAlign:'center', padding:60 }}>Sin proyectos en este corte</div>
+        )}
       </div>
     </div>
   )
