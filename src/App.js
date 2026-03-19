@@ -945,20 +945,23 @@ function CalendarPanel({ projectKey }) {
   }
 
   // Button to sync all calendar events to Gantt as tasks
+  const { insert: insertGanttRow } = useSupabaseTable('gantt_tasks', `gantt_rows_${projectKey}`, [], 'created_at')
+
   const syncToGantt = async () => {
+    let count = 0
     for (const ev of filteredCalRows) {
-      // Check if already exists in gantt by checking localStorage
-      const lsKey = `gantt_rows_${projectKey}`
-      const existing = JSON.parse(localStorage.getItem(lsKey)||'[]')
-      const alreadyExists = existing.find(r=>r.task===ev.event_name && r.start===ev.event_date)
-      if (!alreadyExists) {
-        // Will be inserted via the Gantt's insert function - we need to pass this up
-        // For now store in localStorage for Gantt to pick up
-        const newRow = { id: Date.now()+Math.random(), task: ev.event_name, start: ev.event_date, end: ev.event_date, assignee:'', status:'pending', project_key: projectKey, color: ev.color||'#1D9E75' }
-        localStorage.setItem(lsKey, JSON.stringify([...existing, newRow]))
-      }
+      if (!ev.event_name || !ev.event_date) continue
+      await insertGanttRow({
+        task: ev.event_name,
+        start_date: ev.event_date,
+        end_date: ev.event_date,
+        assignee: '',
+        status: 'pending',
+        project_key: projectKey
+      })
+      count++
     }
-    alert(`✅ ${filteredCalRows.length} eventos enviados al Gantt`)
+    alert(`✅ ${count} eventos agregados al Gantt`)
   }
 
   // Drag and drop
