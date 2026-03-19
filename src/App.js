@@ -83,6 +83,42 @@ function LoginScreen({ onLogin }) {
   )
 }
 
+
+function DashProjectMeta({ projectId }) {
+  const lsKey = `proj_meta_${projectId}`
+  const [meta, setMeta] = useLS(lsKey, { descripcion:'', entregables:'', specs:'' })
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <button onClick={()=>setOpen(o=>!o)} style={{ fontSize:10, color:'var(--text3)', background:'none', border:'none', cursor:'pointer', padding:0, marginBottom: open?8:0 }}>
+        {open?'▲ Ocultar info':'▼ Descripción / Entregables / Specs'}
+      </button>
+      {open && (
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          <div>
+            <div style={{ fontSize:10, color:'var(--text3)', marginBottom:2 }}>Descripción</div>
+            <textarea value={meta.descripcion} onChange={e=>setMeta(m=>({...m,descripcion:e.target.value}))} placeholder="Descripción del proyecto..." rows={2}
+              style={{ ...iStyle, resize:'none', fontSize:11, lineHeight:1.4, overflow:'hidden' }}
+              onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+          </div>
+          <div>
+            <div style={{ fontSize:10, color:'var(--text3)', marginBottom:2 }}>Entregables</div>
+            <textarea value={meta.entregables} onChange={e=>setMeta(m=>({...m,entregables:e.target.value}))} placeholder="Lista de entregables..." rows={2}
+              style={{ ...iStyle, resize:'none', fontSize:11, lineHeight:1.4, overflow:'hidden' }}
+              onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+          </div>
+          <div>
+            <div style={{ fontSize:10, color:'var(--text3)', marginBottom:2 }}>Especificaciones técnicas</div>
+            <textarea value={meta.specs} onChange={e=>setMeta(m=>({...m,specs:e.target.value}))} placeholder="Resolución, fps, formato, codec..." rows={2}
+              style={{ ...iStyle, resize:'none', fontSize:11, lineHeight:1.4, overflow:'hidden' }}
+              onInput={e=>{e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Dashboard({ projects, tasks, deleteProject }) {
   const pending = tasks.filter(t=>!t.done).length
   return (
@@ -104,8 +140,9 @@ function Dashboard({ projects, tasks, deleteProject }) {
               <div style={{ fontSize:13, fontWeight:500, flex:1 }}>{p.name}</div>
               <button onClick={e=>{e.stopPropagation();if(window.confirm('¿Eliminar proyecto '+p.name+'?'))deleteProject(p.id)}} style={{ background:'none', border:'none', cursor:'pointer', fontSize:11, color:'var(--text3)', padding:'2px 4px' }}>✕</button>
             </div>
-            <div style={{ fontSize:11, color:'var(--text3)', marginBottom:10 }}>{p.director} · {p.duration}</div>
-            <div style={{ height:4, background:'var(--bg3)', borderRadius:2, overflow:'hidden' }}><div style={{ height:'100%', width:p.progress+'%', background:getProjectColor(p.name,projects), borderRadius:2 }}></div></div>
+            <div style={{ fontSize:11, color:'var(--text3)', marginBottom:8 }}>{p.director} · {p.duration}</div>
+            <DashProjectMeta projectId={p.id} />
+            <div style={{ height:4, background:'var(--bg3)', borderRadius:2, overflow:'hidden', marginTop:8 }}><div style={{ height:'100%', width:p.progress+'%', background:getProjectColor(p.name,projects), borderRadius:2 }}></div></div>
             <div style={{ fontSize:11, color:'var(--text2)', marginTop:4 }}>{p.progress}% completado</div>
           </div>
         ))}
@@ -181,6 +218,54 @@ function ScriptPanel({ projectKey }) {
       <div style={{ display:'flex', gap:8, marginTop:12, flexWrap:'wrap' }}>
         {[['Escena','scene'],['Acción','action'],['Personaje','character'],['Diálogo','dialogue'],['Paréntesis','parenthetical']].map(([label,type])=>(
           <button key={type} style={btnS} onClick={()=>add(type)}>+ {label}</button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
+function ReferenciasPanel({ projectKey }) {
+  const lsKey = `referencias_${projectKey}`
+  const [links, setLinks] = useLS(lsKey, [])
+  const [newUrl, setNewUrl] = useState('')
+  const [newLabel, setNewLabel] = useState('')
+  const [newCat, setNewCat] = useState('referencia')
+  const cats = ['referencia','drive','sheets','docs','youtube','figma','otro']
+  const catIcon = { referencia:'🔗', drive:'📁', sheets:'📊', docs:'📄', youtube:'▶️', figma:'🎨', otro:'🌐' }
+  const add = () => {
+    if (!newUrl.trim()) return
+    setLinks(l=>[...l,{ id:Date.now(), url:newUrl.trim(), label:newLabel.trim()||newUrl.trim(), cat:newCat }])
+    setNewUrl(''); setNewLabel('')
+  }
+  const remove = id => setLinks(l=>l.filter(x=>x.id!==id))
+  return (
+    <div>
+      <div style={{ ...card, marginBottom:16 }}>
+        <div style={{ fontSize:12, fontWeight:500, color:'var(--text2)', marginBottom:12 }}>Agregar liga o referencia</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:8, marginBottom:8 }}>
+          <input style={iStyle} value={newUrl} onChange={e=>setNewUrl(e.target.value)} placeholder="https://..." onKeyDown={e=>e.key==='Enter'&&add()} />
+          <input style={iStyle} value={newLabel} onChange={e=>setNewLabel(e.target.value)} placeholder="Nombre / descripción" onKeyDown={e=>e.key==='Enter'&&add()} />
+          <select style={iStyle} value={newCat} onChange={e=>setNewCat(e.target.value)}>
+            {cats.map(c=><option key={c} value={c}>{catIcon[c]} {c}</option>)}
+          </select>
+        </div>
+        <button style={btnP} onClick={add}>+ Agregar</button>
+      </div>
+      {links.length===0 && <div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>Sin referencias aún. Agrega ligas a Drive, Sheets, YouTube, referencias visuales, etc.</div>}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:10 }}>
+        {links.map(l=>(
+          <div key={l.id} style={{ ...card, display:'flex', alignItems:'center', gap:12, padding:'12px 14px' }}>
+            <div style={{ fontSize:20, flexShrink:0 }}>{catIcon[l.cat]||'🔗'}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:13, fontWeight:500, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{l.label}</div>
+              <a href={l.url} target="_blank" rel="noreferrer" style={{ fontSize:11, color:'var(--blue)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', display:'block' }}>{l.url}</a>
+            </div>
+            <div style={{ display:'flex', gap:6 }}>
+              <a href={l.url} target="_blank" rel="noreferrer" style={{ ...btnS, fontSize:11, textDecoration:'none', padding:'4px 10px' }}>Abrir ↗</a>
+              <button style={btnD} onClick={()=>remove(l.id)}>✕</button>
+            </div>
+          </div>
         ))}
       </div>
     </div>
@@ -591,8 +676,10 @@ function StoryboardPanel({ projectKey }) {
   )
 }
 
-function GanttPanel({ projects, projectKey }) {
+function GanttPanel({ projects, projectKey, calProjectKey }) {
   const { data: rawRows, insert: insertRow, update: updateRowDB, remove: removeRowDB } = useSupabaseTable('gantt_tasks', `gantt_rows_${projectKey}`, [], 'created_at')
+  const { data: calRowsAll } = useSupabaseTable('calendar_events', `cal_events_${calProjectKey}`, [], 'created_at')
+  const calEvents = (Array.isArray(calRowsAll)?calRowsAll:[]).filter(r=>r.project_key===projectKey)
   const filteredRows = (Array.isArray(rawRows) ? rawRows : []).filter(r => !r.project_key || r.project_key === projectKey)
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
@@ -769,6 +856,18 @@ function GanttPanel({ projects, projectKey }) {
                 ))}
               </div>
 
+              {/* Calendar events as background markers */}
+              {calEvents.map(ev=>{
+                if (!ev.event_date || !ev.event_name) return null
+                const evDate = parseDate(ev.event_date)
+                if (evDate < minD || evDate > maxD) return null
+                const evL = zoom==='week'?(diffDays(minD,evDate)/7)*CELL:((evDate-minD)/(maxD-minD))*totalW
+                return (
+                  <div key={ev.id} style={{ position:'absolute', left:evL, top:0, bottom:0, width:2, background:ev.color||'#1D9E75', opacity:0.6, zIndex:1 }} title={`📅 ${ev.event_name}`}>
+                    <div style={{ position:'absolute', top:4, left:4, fontSize:9, color:ev.color||'#1D9E75', whiteSpace:'nowrap', fontWeight:500 }}>{ev.event_name}</div>
+                  </div>
+                )
+              })}
               {allProjects.map(proj=>(
                 <React.Fragment key={proj}>
                   <div style={{ height:26, background:'var(--bg3)', borderBottom:'0.5px solid var(--border)', minWidth:totalW }}></div>
@@ -813,13 +912,15 @@ function GanttPanel({ projects, projectKey }) {
 
 
 function CalendarPanel({ projectKey }) {
-  const { data: calRows, insert: insertEvent, remove: removeEvent } = useSupabaseTable('calendar_events', `cal_events_${projectKey}`, [], 'created_at')
+  const { data: calRows, insert: insertEvent, update: updateEvent, remove: removeEvent } = useSupabaseTable('calendar_events', `cal_events_${projectKey}`, [], 'created_at')
   const filteredCalRows = (Array.isArray(calRows) ? calRows : []).filter(r => r.project_key === projectKey)
-  const events = filteredCalRows.reduce((acc, r) => { acc[r.event_date] = r.event_name; return acc }, {})
+  const events = filteredCalRows.reduce((acc, r) => { acc[r.event_date] = { name: r.event_name, color: r.color||'#1D9E75', id: r.id }; return acc }, {})
   const [year, setYear] = useState(new Date().getFullYear())
   const [month, setMonth] = useState(new Date().getMonth())
   const [adding, setAdding] = useState(null)
   const [newEvt, setNewEvt] = useState('')
+  const [newColor, setNewColor] = useState('#1D9E75')
+  const EVENT_COLORS = ['#1D9E75','#185FA5','#854F0B','#993556','#533AB7','#A32D2D','#3B6D11','#c48a30','#0F6E56','#1a6b8a']
   const MONTHS_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
   const pad = d => String(d).padStart(2,'0')
   const keyFor = d => `${year}-${pad(month+1)}-${pad(d)}`
@@ -836,6 +937,7 @@ function CalendarPanel({ projectKey }) {
         <div style={{ fontSize:14, fontWeight:500, flex:1, textAlign:'center' }}>{MONTHS_FULL[month]} {year}</div>
         <button style={btnS} onClick={nextMonth}>→</button>
         <button style={{ ...btnS, fontSize:11 }} onClick={()=>{setMonth(today.getMonth());setYear(today.getFullYear())}}>Hoy</button>
+        <button style={{ ...btnS, fontSize:11 }} onClick={()=>window.print()}>↓ PDF</button>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:4, marginBottom:6 }}>
         {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=><div key={d} style={{ textAlign:'center', fontSize:11, color:'var(--text3)', padding:4 }}>{d}</div>)}
@@ -845,15 +947,24 @@ function CalendarPanel({ projectKey }) {
         {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>{
           const key=keyFor(d); const evt=events[key]
           const isToday = today.getDate()===d&&today.getMonth()===month&&today.getFullYear()===year
-          return <div key={d} onClick={()=>{setAdding(key);setNewEvt(evt||'')}}
+          return <div key={d} onClick={()=>{setAdding(key);setNewEvt(evt?.name||'');setNewColor(evt?.color||'#1D9E75')}}
             style={{ background:'var(--bg)', border:`0.5px solid ${isToday?'var(--green)':'var(--border)'}`, borderRadius:10, minHeight:52, padding:6, cursor:'pointer' }}>
             <div style={{ fontSize:12, fontWeight:isToday?500:400, color:isToday?'var(--green)':'var(--text)' }}>{d}</div>
-            {evt&&<div style={{ fontSize:9, background:'var(--green-light)', color:'var(--green-dark)', padding:'1px 4px', borderRadius:3, marginTop:2, lineHeight:1.4 }}>{evt}</div>}
+            {evt&&<div style={{ fontSize:9, background:evt.color||'#1D9E75', color:'white', padding:'1px 4px', borderRadius:3, marginTop:2, lineHeight:1.4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{evt.name}</div>}
           </div>
         })}
       </div>
       <Modal open={!!adding} onClose={()=>setAdding(null)} title={`Evento — ${adding}`}>
         <input style={iStyle} value={newEvt} onChange={e=>setNewEvt(e.target.value)} placeholder="Nombre del evento..." autoFocus />
+        <div style={{ marginTop:10, marginBottom:4 }}>
+          <div style={{ fontSize:11, color:'var(--text2)', marginBottom:6 }}>Color del evento</div>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+            {EVENT_COLORS.map(c=>(
+              <div key={c} onClick={()=>setNewColor(c)}
+                style={{ width:24, height:24, borderRadius:'50%', background:c, cursor:'pointer', border: newColor===c?'3px solid var(--text)':'3px solid transparent', transition:'transform 0.1s', transform:newColor===c?'scale(1.2)':'scale(1)' }} />
+            ))}
+          </div>
+        </div>
         <div style={{ display:'flex', gap:8, marginTop:12, justifyContent:'flex-end' }}>
           <button style={btnS} onClick={()=>setAdding(null)}>Cancelar</button>
           {events[adding]&&<button style={{ ...btnS, color:'var(--danger)' }} onClick={()=>{
@@ -865,7 +976,7 @@ function CalendarPanel({ projectKey }) {
             if(newEvt.trim()) {
               const existing = filteredCalRows.find(r=>r.event_date===adding)
               if(existing) await removeEvent(existing.id)
-              await insertEvent({event_date:adding, event_name:newEvt.trim(), project_key:projectKey})
+              await insertEvent({event_date:adding, event_name:newEvt.trim(), color:newColor, project_key:projectKey})
             }
             setAdding(null)
           }}>Guardar</button>
@@ -1614,6 +1725,7 @@ const PANELS = [
   { id:'script', label:'Guión', group:'Preproducción' },
   { id:'breakdown', label:'Breakdown', group:'Preproducción' },
   { id:'storyboard', label:'Storyboard', group:'Preproducción' },
+  { id:'referencias', label:'Referencias / Links', group:'Preproducción' },
   { id:'gantt', label:'Timeline / Gantt', group:'Producción' },
   { id:'calendar', label:'Cronograma', group:'Producción' },
   { id:'budget', label:'Presupuesto', group:'Finanzas', adminOnly:true },
@@ -1657,7 +1769,8 @@ export default function App() {
       case 'script': return <ScriptPanel projectKey={projectKey} />
       case 'breakdown': return <BreakdownPanel projectKey={projectKey} />
       case 'storyboard': return <StoryboardPanel projectKey={projectKey} />
-      case 'gantt': return <GanttPanel projects={projects} projectKey={projectKey} />
+      case 'referencias': return <ReferenciasPanel projectKey={projectKey} />
+      case 'gantt': return <GanttPanel projects={projects} projectKey={projectKey} calProjectKey={projectKey} />
       case 'calendar': return <CalendarPanel projectKey={projectKey} />
       case 'budget': return user.role==='admin'?<BudgetPanel projectKey={projectKey} />:<div style={{ padding:40, textAlign:'center', color:'var(--text3)' }}>Sin acceso</div>
       case 'tracking': return <TrackingPanel projectKey={projectKey} />
@@ -1673,7 +1786,7 @@ export default function App() {
     <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg2)' }}>
       <div style={{ width:220, minWidth:220, background:'var(--bg)', borderRight:'0.5px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden' }} className="no-print">
         <div style={{ padding:'16px 14px', borderBottom:'0.5px solid var(--border)' }}>
-          <img src="/logo.png" alt="ComboApp" style={{ height:44, maxWidth:180, objectFit:'contain' }} onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block'}} /><div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px', display:'none' }}>Combo<span style={{ color:'var(--green)' }}>App</span></div>
+          <img src="/logo.png" alt="ComboApp" style={{ height:44, maxWidth:180, objectFit:'contain', filter:'invert(1) brightness(2)' }} onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='block'}} /><div style={{ fontSize:16, fontWeight:600, letterSpacing:'-0.5px', display:'none', color:'white' }}>¡HOLA! <span style={{ color:'#4dd4a0' }}>COMBO</span></div>
           <div style={{ marginTop:10 }}>
             <div style={{ fontSize:10, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'0.7px', marginBottom:4 }}>Proyecto activo</div>
             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
