@@ -44,11 +44,17 @@ export function useSupabaseTable(table, localKey, init, orderCol = 'created_at')
   }
 
   const update = async (id, changes) => {
-    // Optimistic
+    // Optimistic local update first
     setData(d => { const n=d.map(x=>x.id===id?{...x,...changes}:x); localStorage.setItem(localKey,JSON.stringify(n)); return n })
     if (!supabase) return
-    const { error } = await supabase.from(table).update(changes).eq('id', id)
-    if (error) console.error(`Supabase update error [${table}]:`, error.message, changes)
+    const { data: updated, error } = await supabase.from(table).update(changes).eq('id', id).select()
+    if (error) {
+      console.error(`Supabase update error [${table}] id=${id}:`, error.message, error.details, changes)
+    } else if (updated && updated[0]) {
+      // Sync with actual DB values
+      setData(d => { const n=d.map(x=>x.id===id?{...x,...updated[0]}:x); localStorage.setItem(localKey,JSON.stringify(n)); return n })
+    }
+    return { error, data: updated }
   }
 
   const remove = async (id) => {
