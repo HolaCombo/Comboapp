@@ -269,8 +269,8 @@ function ScriptPanel({ projectKey }) {
 
 
 function ReferenciasPanel({ projectKey }) {
-  const lsKey = `referencias_${projectKey}`
-  const [links, setLinks] = useLS(lsKey, [])
+  const { data: allLinks, insert: insertLink, remove: removeLink } = useSupabaseTable('referencias', `referencias_${projectKey}`, [], 'created_at')
+  const links = (Array.isArray(allLinks)?allLinks:[]).filter(r=>r.project_key===projectKey)
   const [newUrl, setNewUrl] = useState('')
   const [newLabel, setNewLabel] = useState('')
   const [newCat, setNewCat] = useState('referencia')
@@ -278,10 +278,10 @@ function ReferenciasPanel({ projectKey }) {
   const catIcon = { referencia:'🔗', drive:'📁', sheets:'📊', docs:'📄', youtube:'▶️', figma:'🎨', otro:'🌐' }
   const add = () => {
     if (!newUrl.trim()) return
-    setLinks(l=>[...l,{ id:Date.now(), url:newUrl.trim(), label:newLabel.trim()||newUrl.trim(), cat:newCat }])
+    insertLink({ project_key:projectKey, url:newUrl.trim(), label:newLabel.trim()||newUrl.trim(), cat:newCat })
     setNewUrl(''); setNewLabel('')
   }
-  const remove = id => setLinks(l=>l.filter(x=>x.id!==id))
+  const remove = id => removeLink(id)
   return (
     <div>
       <div style={{ ...card, marginBottom:16 }}>
@@ -298,7 +298,7 @@ function ReferenciasPanel({ projectKey }) {
       {links.length===0 && <div style={{ textAlign:'center', color:'var(--text3)', fontSize:13, padding:40 }}>Sin referencias aún. Agrega ligas a Drive, Sheets, YouTube, referencias visuales, etc.</div>}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:10 }}>
         {links.map(l=>(
-          <div key={l.id} style={{ ...card, display:'flex', alignItems:'center', gap:12, padding:'12px 14px' }}>
+          <div key={l.id} style={{ ...card, display:'flex', alignItems:'center', gap:12, padding:'12px 14px', marginBottom:0 }}>
             <div style={{ fontSize:20, flexShrink:0 }}>{catIcon[l.cat]||'🔗'}</div>
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontSize:13, fontWeight:500, color:'var(--text)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{l.label}</div>
@@ -1366,11 +1366,11 @@ function CalendarPanel({ projectKey }) {
 }
 
 function BudgetPanel({ projectKey }) {
-  const lsKeyB = `budget_rows_${projectKey}`
-  const [rows, setRows] = useLS(lsKeyB, seedBudget)
-  const update = (id,key,val) => setRows(r=>r.map(x=>x.id===id?{...x,[key]:key==='concept'||key==='section'?val:parseFloat(val)||0}:x))
-  const remove = id => setRows(r=>r.filter(x=>x.id!==id))
-  const addRow = () => setRows(r=>[...r,{id:Date.now(),section:'General',concept:'',days:0,unitario:0,iva:0.16}])
+  const { data: allRows, insert: insertRowDB, update: updateRowDB, remove: removeRowDB } = useSupabaseTable('presupuesto', `presupuesto_${projectKey}`, [], 'created_at')
+  const rows = (Array.isArray(allRows)?allRows:[]).filter(r=>r.project_key===projectKey)
+  const update = (id,key,val) => updateRowDB(id,{[key]:key==='concept'||key==='section'?val:parseFloat(val)||0})
+  const remove = id => removeRowDB(id)
+  const addRow = () => insertRowDB({project_key:projectKey,section:'General',concept:'',days:0,unitario:0,iva:0.16})
   const calc = row => { const costo=row.days*row.unitario; const ivaAmt=costo*row.iva; return { costo, ivaAmt, total:costo+ivaAmt } }
   const sections = [...new Set(rows.map(r=>r.section))]
   const grandTotal = rows.reduce((a,r)=>a+calc(r).total,0)
@@ -1662,7 +1662,8 @@ const SEMAFORO = [
 ]
 
 function MiSemanaPanel({ user }) {
-  const [cortes, setCortes] = useLS(`misemana_${user.id}`, [])
+  const { data: cortesRaw, insert: insertCorte, update: updateCorteDB, remove: removeCorteDB } = useSupabaseTable('misemana', `misemana_${user.id}`, [], 'created_at')
+  const cortes = (Array.isArray(cortesRaw)?cortesRaw:[]).filter(c=>c.user_id===String(user.id)).map(c=>({...c, proyectos: Array.isArray(c.proyectos)?c.proyectos:(typeof c.proyectos==='string'?JSON.parse(c.proyectos||'[]'):[])}))
   const [showNew, setShowNew] = useState(false)
   const [currentCorte, setCurrentCorte] = useState(null)
   const [editingCorte, setEditingCorte] = useState(null)
@@ -1674,17 +1675,18 @@ function MiSemanaPanel({ user }) {
     setShowNew(true)
   }
 
-  const saveCorte = (corte) => {
-    setCortes(c => {
-      const exists = c.find(x => x.id===corte.id)
-      return exists ? c.map(x=>x.id===corte.id?corte:x) : [corte, ...c]
-    })
+  const saveCorte = async (corte) => {
+    if (corte.id && cortes.find(x=>x.id===corte.id)) {
+      await updateCorteDB(corte.id, { fecha: corte.fecha, proyectos: corte.proyectos })
+    } else {
+      await insertCorte({ user_id: String(user.id), fecha: corte.fecha, proyectos: corte.proyectos })
+    }
     setShowNew(false)
     setEditingCorte(null)
     setCurrentCorte(corte.id)
   }
 
-  const deleteCorte = id => { setCortes(c=>c.filter(x=>x.id!==id)); if(currentCorte===id) setCurrentCorte(null) }
+  const deleteCorte = async id => { await removeCorteDB(id); if(currentCorte===id) setCurrentCorte(null) }
 
   const activeCorte = cortes.find(c=>c.id===currentCorte) || cortes[0]
 
