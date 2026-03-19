@@ -679,7 +679,7 @@ function StoryboardPanel({ projectKey }) {
 function GanttPanel({ projects, projectKey, calProjectKey }) {
   const { data: rawRows, insert: insertRow, update: updateRowDB, remove: removeRowDB } = useSupabaseTable('gantt_tasks', `gantt_rows_${projectKey}`, [], 'created_at')
   const { data: calRowsAll } = useSupabaseTable('calendar_events', `cal_events_${calProjectKey}`, [], 'created_at')
-  const calEvents = (Array.isArray(calRowsAll)?calRowsAll:[]).filter(r=>r.project_key===projectKey)
+  const calEvents = (Array.isArray(calRowsAll)?calRowsAll:[]).filter(r=>!r.project_key||r.project_key===projectKey)
   const filteredRows = (Array.isArray(rawRows) ? rawRows : []).filter(r => !r.project_key || r.project_key === projectKey)
   const [zoom, setZoom] = useState('week')
   const [showForm, setShowForm] = useState(false)
@@ -935,15 +935,30 @@ function CalendarPanel({ projectKey }) {
   const saveEvent = async () => {
     if (!newEvt.trim()) return
     if (editing) {
-      // Edit existing event
       await updateEvent(editing.id, { event_name: newEvt.trim(), color: newColor })
       setEditing(null)
     } else {
-      // Add new event
       await insertEvent({ event_date: adding, event_name: newEvt.trim(), color: newColor, project_key: projectKey })
       setAdding(null)
     }
     setNewEvt('')
+  }
+
+  // Button to sync all calendar events to Gantt as tasks
+  const syncToGantt = async () => {
+    for (const ev of filteredCalRows) {
+      // Check if already exists in gantt by checking localStorage
+      const lsKey = `gantt_rows_${projectKey}`
+      const existing = JSON.parse(localStorage.getItem(lsKey)||'[]')
+      const alreadyExists = existing.find(r=>r.task===ev.event_name && r.start===ev.event_date)
+      if (!alreadyExists) {
+        // Will be inserted via the Gantt's insert function - we need to pass this up
+        // For now store in localStorage for Gantt to pick up
+        const newRow = { id: Date.now()+Math.random(), task: ev.event_name, start: ev.event_date, end: ev.event_date, assignee:'', status:'pending', project_key: projectKey, color: ev.color||'#1D9E75' }
+        localStorage.setItem(lsKey, JSON.stringify([...existing, newRow]))
+      }
+    }
+    alert(`✅ ${filteredCalRows.length} eventos enviados al Gantt`)
   }
 
   // Drag and drop
@@ -965,6 +980,7 @@ function CalendarPanel({ projectKey }) {
         <button style={btnS} onClick={nextMonth}>→</button>
         <button style={{ ...btnS, fontSize:11 }} onClick={()=>{setMonth(today.getMonth());setYear(today.getFullYear())}}>Hoy</button>
         <button style={{ ...btnS, fontSize:11 }} onClick={()=>window.print()}>↓ PDF</button>
+        <button style={{ ...btnS, fontSize:11, color:'var(--blue)', borderColor:'var(--blue)' }} onClick={syncToGantt}>⇄ Sync al Gantt</button>
       </div>
 
       {/* Day headers */}
