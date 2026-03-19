@@ -628,7 +628,6 @@ function StoryboardPanel({ projectKey }) {
   const [bulkUploading, setBulkUploading] = useState(false)
   const [bulkProgress, setBulkProgress] = useState({ done:0, total:0 })
   const [dragPanel, setDragPanel] = useState(null)
-  const [bulkUploading, setBulkUploading] = useState(false)
   const [bulkProgress, setBulkProgress] = useState('')
 
   const loadImg = async (id, file) => {
