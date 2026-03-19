@@ -512,7 +512,11 @@ function StoryboardPanel({ projectKey }) {
   const [view, setView] = useState('cards')
   const [syncing, setSyncing] = useState(false)
   const [initialized, setInitialized] = useState(false)
-
+  const [savingImgs, setSavingImgs] = useState(new Set())
+  const [draggingPanel, setDraggingPanel] = useState(null)
+  const [dragOverPanel, setDragOverPanel] = useState(null)
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState({ done:0, total:0 })
 
   const savingImgsRef = useRef(new Set())
   useEffect(() => { savingImgsRef.current = savingImgs }, [savingImgs])
